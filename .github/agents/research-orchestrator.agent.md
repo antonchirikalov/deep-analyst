@@ -41,7 +41,11 @@ Phase 5: Delivery
    - **Illustrations:** ALWAYS enabled by default. Only disable if user explicitly says `no illustrations` / `text only` / `illustrations: no`
    - **Language:** any (detect from query text or explicit parameter)
 3. If a parameter is NOT specified, use defaults: `standard`, illustrations ON, language of the query
-4. **Search depth auto-mapping** (if `search_depth` not explicitly set by user):
+4. **Content depth auto-mapping** (based on document size):
+   - `brief` → `content_depth: conceptual` — NO formulas, max diagrams, analogy-rich
+   - `standard` → `content_depth: balanced` — max 2–3 formulas, visual + text mix
+   - `detailed` → `content_depth: deep` — formulas welcome, full mathematical treatment
+5. **Search depth auto-mapping** (if `search_depth` not explicitly set by user):
    - `brief` → `normal`
    - `standard` → `normal`
    - `detailed` → `deep` (all subtopics get `priority: high` → full Tavily budget including `tavily_research`)
@@ -63,7 +67,13 @@ Phase 5: Delivery
    - Document type
    - Research folder path
    - `max_pages` constraint
-   - **Explicit instruction:** "Do NOT create any inline code-based diagrams. For ALL visualizations, insert `<!-- ILLUSTRATION: type=..., section=..., description=\"...\" -->` placeholders with 200+ char descriptions — the Illustrator will generate PaperBanana-style PNGs for these in Phase 3. Each document needs 3–5 illustration placeholders."
+   - **`content_depth`** parameter: `conceptual` (brief), `balanced` (standard), or `deep` (detailed)
+   - **Explicit instruction:** "Do NOT create any inline code-based diagrams. For ALL visualizations, insert `<!-- ILLUSTRATION: type=..., section=..., description=\"...\" -->` placeholders with 200+ char descriptions — the Illustrator will generate PaperBanana-style PNGs for these in Phase 3."
+   - **Universal instruction (ALL tiers):** "The document is written for humans. Every concept must be explained in clear, plain language FIRST — formulas are optional supplements, never the explanation itself. If you remove every formula, the document must still fully make sense. Prefer analogies, concrete examples, and visual explanations over abstract notation."
+   - **Depth-specific instruction based on content_depth:**
+     - `conceptual`: "ZERO formulas. Replace every formula with a visual analogy or diagram placeholder. Explain concepts with metaphors and everyday comparisons. Target 5–7 illustration placeholders — diagrams REPLACE formulas."
+     - `balanced`: "Max 2–3 key formulas in the entire document. Each formula must be PRECEDED (not just followed) by a full plain-language explanation. The formula is an aside, not the content. Lead with intuition. Target 4–6 illustration placeholders."
+     - `deep`: "Formulas allowed where they add precision, but EVERY formula must be preceded by a clear prose explanation of what it does and why. The reader should understand the concept before seeing the math. Target 5–8 illustration placeholders."
 2. Analyst reads research files and writes `draft/v1.md`
 3. **Verify:** draft contains **3–5** `<!-- ILLUSTRATION -->` placeholders with detailed descriptions
 4. Log draft creation to workflow_log.md

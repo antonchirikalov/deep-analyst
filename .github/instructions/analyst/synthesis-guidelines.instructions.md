@@ -67,3 +67,38 @@ If Scout research doesn't cover a required section:
 - Weaker evidence (blogs, forums) supports "some practitioners report..." style claims
 - Numerical data requires a source — never estimate without attribution
 - Use "approximately" when exact numbers vary across sources
+
+## Depth-Aware Writing
+
+The `content_depth` parameter changes HOW you synthesize the same facts:
+
+### Universal Approach (ALL TIERS)
+
+Regardless of depth tier, always follow this pattern for every technical concept:
+1. **First:** Explain what it does and why it matters — in plain language, with an analogy or concrete example
+2. **Then (if tier allows):** Optionally show the formula as a supplement
+3. **Then:** Show the practical consequence — "This is why the model can..."
+
+Never reverse this order. Never let a formula be the first encounter with a concept.
+
+### `conceptual` — Prioritize Understanding over Precision
+- Transform every technical mechanism into an analogy or visual explanation
+- Instead of: "The self-attention mechanism computes Q·K^T/√d_k and applies softmax to obtain attention weights"
+- Write: "Think of attention as a search engine inside the model: each word creates a query ('what am I looking for?'), and all other words offer keys ('here's what I contain'). The model scores how well each key matches the query, then blends the relevant information accordingly."
+- **Insert an ILLUSTRATION placeholder** for every mechanism that would normally need a formula
+- Focus on WHY things work, not HOW they compute
+- Use numbered step-by-step conceptual breakdowns ("Step 1: Each word asks a question...")
+
+### `balanced` — Lead with Intuition, Support with Precision
+- Start each concept with the intuitive explanation — complete enough to stand on its own
+- Add 1–2 key formulas only where they genuinely help understanding, and only AFTER the full prose explanation
+- The formula should feel like a "P.S." — the explanation already happened
+- Balance prose explanation with visual diagram placeholders
+- Provide practical implications: "This means the model can process a 100K token document because..."
+
+### `deep` — Full Technical Treatment with Clear Explanations
+- **STILL explain every concept in plain language first** — then add the math
+- Include mathematical foundations and derivations, but each one starts with a prose paragraph explaining what it means
+- Show computation graphs, complexity analysis, numerical examples
+- Cross-reference between formal definitions and practical implications
+- The math supports the explanation, not the other way around

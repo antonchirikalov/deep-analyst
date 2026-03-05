@@ -76,13 +76,31 @@ For every section that needs a visual diagram, the Analyst MUST insert this HTML
 5. **Quantity** — every document MUST have **3–5 illustration placeholders**
 6. **DO NOT** create any inline code-based diagrams — ALL visuals are PaperBanana PNGs
 
-## Scaling by Document Size
+## Scaling by Content Depth Tier
 
-| Document Size | Illustration Count |
-|--------------|-------------------|
-| Short (~1500–2500 words) | 2–3 placeholders |
-| Standard (~3000–5000 words) | 3–4 placeholders |
-| Detailed (~5000–8000 words) | 4–5 placeholders |
+The Orchestrator passes `content_depth` which determines illustration strategy:
+
+| Content Depth | Illustration Count | Strategy |
+|--------------|-------------------|----------|
+| **conceptual** (brief) | **5–7 placeholders** | Diagrams REPLACE formulas. Every complex concept gets a visual explanation instead of math. Prioritize `conceptual`, `pipeline`, `infographic` types. Add explanatory annotations in descriptions. |
+| **balanced** (standard) | **4–6 placeholders** | Diagrams SUPPLEMENT minimal formulas. Mix architecture diagrams with explanatory visuals. Use `architecture`, `pipeline`, `comparison` types. |
+| **deep** (detailed) | **5–8 placeholders** | Diagrams COMPLEMENT formal math. Include computation graphs, attention heatmaps, formal architecture diagrams. Use `architecture`, `comparison`, `pipeline` types. |
+
+### Explanatory Illustrations (conceptual & balanced tiers)
+
+At `conceptual` and `balanced` depth, use a special illustration subtype: **explanatory diagrams** that visually teach a concept instead of showing it as a formula.
+
+**Example — Attention Mechanism (conceptual tier):**
+```markdown
+<!-- ILLUSTRATION: type=conceptual, section="§4. How Attention Works", description="Visual explanation of attention as a library analogy: LEFT side shows a person (Query) asking a question at a library desk. MIDDLE shows rows of book spines (Keys) on shelves with relevance scores (bright=high, dim=low) floating above each. RIGHT shows the person receiving a weighted mix of book contents (Values) — thicker arrows from more relevant books. Below: a simplified 3-step pipeline: 1) Compare query with all keys 2) Score relevance (highlight matching) 3) Mix values by relevance scores. Pastel colors: azure for query, coral for keys, mint for values. No math notation — pure visual metaphor." -->
+
+*[Рис. N. Механизм внимания: интуитивное объяснение]*
+```
+
+Compare with the same concept at **deep** tier:
+```markdown
+<!-- ILLUSTRATION: type=architecture, section="§4. Attention Mechanism", description="Formal computation graph of scaled dot-product attention: three input matrices Q,K,V (blue boxes) → MatMul node (Q×K^T) → Scale node (÷√d_k) → Softmax node → MatMul node (×V) → Output Z. Show tensor dimensions at each edge: Q[n×d_k], K[n×d_k], V[n×d_v], scores[n×n], output[n×d_v]. Include multi-head split/concat wrapper around the core." -->
+```
 
 ## What Makes a Good Description
 

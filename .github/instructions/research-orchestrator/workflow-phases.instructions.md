@@ -25,14 +25,14 @@ Phase 0: Clarify Parameters → Phase 1: Scout (PARALLEL) → Phase 2: Analyst �
 4. Record `max_pages` and `max_words` in workflow_log.md
 
 **Mapping:**
-| User Choice | max_pages | max_words |
-|------------|-----------|----------|
-| Brief / short | 20 | 8000 |
-| Standard / normal (default) | 40 | 16000 |
-| Detailed / comprehensive | 80 | 32000 |
-| Explicit number (e.g., "50 pages") | Use as-is | pages × 400 |
+| User Choice | max_pages | max_words | content_depth |
+|------------|-----------|----------|---------------|
+| Brief / short | 20 | 8000 | conceptual |
+| Standard / normal (default) | 40 | 16000 | balanced |
+| Detailed / comprehensive | 80 | 32000 | deep |
+| Explicit number (e.g., "50 pages") | Use as-is | pages × 400 | balanced (or deep if >60 pages) |
 
-**Transition to Phase 1:** Parameters clarified, `max_pages` and `max_words` are set.
+**Transition to Phase 1:** Parameters clarified, `max_pages`, `max_words`, and `content_depth` are set.
 
 ## Phase 1: Scout (Parallel Search)
 
@@ -53,10 +53,11 @@ Phase 0: Clarify Parameters → Phase 1: Scout (PARALLEL) → Phase 2: Analyst �
 **Trigger:** All research files available in `research/`
 
 **Actions:**
-1. Activate Analyst with document type, research folder path, and `max_words` constraint
+1. Activate Analyst with document type, research folder path, `max_words` constraint, and **`content_depth` parameter**
 2. Analyst reads all `research/*.md` files
-3. Analyst synthesizes and writes `draft/v1.md` respecting the word limit
-4. Log draft creation to workflow_log.md
+3. Analyst synthesizes and writes `draft/v1.md` respecting the word limit and content depth tier
+4. **Verify:** illustration placeholder count matches the content_depth expectations (conceptual: 5–7, balanced: 4–6, deep: 5–8)
+5. Log draft creation to workflow_log.md
 
 **Transition to Phase 3:** Draft file exists at `draft/v1.md`
 
