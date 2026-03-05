@@ -66,14 +66,14 @@ flowchart TD
 
 ## Agents
 
-| Agent | Model | Purpose | Input | Output |
-|-------|-------|---------|-------|--------|
-| **Research Orchestrator** | Haiku 4.5 | Coordinates the entire pipeline. Decomposes topics into subtopics, assigns priorities, launches agents in sequence, manages Critic iterations | User query | `workflow_log.md`, orchestration decisions |
-| **Scout** | Haiku 4.5 | Gathers raw data from the web. Uses Tavily (3-tier search), Context7 (library docs), GitHub (repos/code), HuggingFace (papers/models) | Subtopic + priority | `research/subtopic_N.md` — structured facts, data, sources |
-| **Analyst** | Opus 4.6 | Synthesizes Scout research into a structured analytical document. Builds comparison tables, draws conclusions, inserts illustration placeholders | Research files + params | `draft/vN.md` — full document draft |
-| **Illustrator** | Sonnet 4.6 | Generates publication-quality PNG diagrams using the PaperBanana method. Reads Analyst's placeholders, creates Golden Schema prompts, generates via gpt-image-1 | Draft with placeholders | `illustrations/*.png` + updated draft |
-| **Research Critic** | Sonnet 4.6 | Peer review. Checks logical coherence, source quality, topic coverage, illustration relevance. Returns structured verdict with severity-tagged issues | Draft + research + manifest | Verdict: APPROVED / REVISE / REJECTED |
-| **PDF Exporter** | Haiku 4.5 | Converts the final Markdown document to PDF, verifying all image references resolve | Final draft | PDF file |
+| Agent | Purpose | Input | Output |
+|-------|---------|-------|--------|
+| **Research Orchestrator** | Coordinates the entire pipeline. Decomposes topics into subtopics, assigns priorities, launches agents in sequence, manages Critic iterations | User query | `workflow_log.md`, orchestration decisions |
+| **Scout** | Gathers raw data from the web. Uses Tavily (3-tier search), Context7 (library docs), GitHub (repos/code), HuggingFace (papers/models) | Subtopic + priority | `research/subtopic_N.md` — structured facts, data, sources |
+| **Analyst** | Synthesizes Scout research into a structured analytical document. Builds comparison tables, draws conclusions, inserts illustration placeholders | Research files + params | `draft/vN.md` — full document draft |
+| **Illustrator** | Generates publication-quality PNG diagrams using the PaperBanana method. Reads Analyst's placeholders, creates Golden Schema prompts, generates via gpt-image-1 | Draft with placeholders | `illustrations/*.png` + updated draft |
+| **Research Critic** | Peer review. Checks logical coherence, source quality, topic coverage, illustration relevance. Returns structured verdict with severity-tagged issues | Draft + research + manifest | Verdict: APPROVED / REVISE / REJECTED |
+| **PDF Exporter** | Converts the final Markdown document to PDF, verifying all image references resolve | Final draft | PDF file |
 
 ### Agent Interaction Flow
 
