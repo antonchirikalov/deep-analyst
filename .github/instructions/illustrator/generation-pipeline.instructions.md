@@ -25,7 +25,8 @@ Phase 1: Plan (descriptions + prompts) → Phase 2: Generate (parallel candidate
    - Pipeline/workflow descriptions
    - Comparison sections with complex relationships
    - Abstract concepts that benefit from visual representation
-5. For each illustration, combine the Analyst's description with the PaperBanana Golden Schema to write 2–3 prompt variations:
+5. For each illustration, combine the Analyst's description with the PaperBanana Golden Schema to write 2–3 prompt variations.
+   **Critical:** Add `"All visible text labels and annotations in the image must be in {language}."` to every prompt (language passed by Orchestrator).
 
 | Aspect | Variation A | Variation B | Variation C |
 |--------|-----------|-----------|-----------|
