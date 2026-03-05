@@ -1,0 +1,20 @@
+# Environment secrets
+.env
+
+# Generated research output (per-run folders)
+generated_docs_*/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
