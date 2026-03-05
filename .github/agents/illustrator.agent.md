@@ -1,6 +1,6 @@
 ---
 name: Illustrator
-description: Publication-quality academic illustration generator using OpenAI gpt-image-1. Pipeline inspired by PaperBanana — Plan prompt variations, Generate candidates in parallel, Select best match.
+description: Publication-quality academic illustration generator using OpenAI gpt-image-1. Plans one optimized prompt per illustration from Analyst placeholders, generates one PNG each.
 model: Claude Sonnet 4.6 (copilot)
 tools: ['read_file', 'create_file', 'replace_string_in_file', 'list_dir', 'run_in_terminal']
 ---
@@ -12,50 +12,32 @@ You are the Illustrator agent responsible for generating publication-quality aca
 # Detailed Instructions
 
 See these instruction files for complete requirements:
-- [generation-pipeline](../instructions/illustrator/generation-pipeline.instructions.md) — three-phase pipeline (Plan → Generate → Select)
+- [generation-pipeline](../instructions/illustrator/generation-pipeline.instructions.md) — two-phase pipeline (Plan → Generate)
 - [style-guidelines](../instructions/illustrator/style-guidelines.instructions.md) — academic illustration style rules and prompt engineering
 - [artifact-management](../instructions/shared/artifact-management.instructions.md) — folder structure conventions
 
-# Three-Phase Pipeline
+# Two-Phase Pipeline
 
 ## Phase 1: Plan
 1. Read the draft document from Analyst (`draft/vN.md`)
 2. **Find all `<!-- ILLUSTRATION: ... -->` placeholder markers** left by the Analyst
 3. Parse each placeholder for: `type`, `section`, and `description`
 4. If no placeholders found — independently identify sections needing visualization (architecture, pipeline, comparison)
-5. For each illustration, use the Analyst's description + your own analysis to write 2–3 prompt variations using the PaperBanana Golden Schema format
-6. Vary prompts by: composition (horizontal/vertical/radial), detail level, and icon style
-7. Write plan as internal notes before proceeding
+5. For each illustration, craft **one optimized prompt** using the PaperBanana Golden Schema:
+   - Use the Analyst's description as the primary source
+   - Choose the best composition for the content (horizontal for flows/pipelines, vertical for hierarchies, radial for comparisons)
+   - Include all elements, connections, colors, and layout details
+   - Prefer horizontal layout for most diagrams (fits document width better)
+6. Write plan as internal notes before proceeding
 
-## Phase 2: Generate (Parallel)
-Generate 2–3 PNG candidates per diagram using the image-generator skill script:
+## Phase 2: Generate
+Generate **one PNG per illustration** using the image-generator skill script:
 
 ```bash
-# One candidate at a time
-python3 .github/skills/image-generator/scripts/generate_image.py "Academic diagram: [description]" "illustrations/diagram_N_a.png"
-
-# Or all candidates in one call via JSON prompt file
-python3 .github/skills/image-generator/scripts/generate_image.py prompts_diagram_N.json illustrations diagram_N
+python3 .github/skills/image-generator/scripts/generate_image.py "Academic diagram: [description]" "illustrations/diagram_N.png"
 ```
 
-## Phase 3: Select
-1. Compare candidates by matching prompt intent to section goals
-2. Pick best candidate based on how well the prompt addressed the section's needs
-3. Rename selected candidate to `diagram_N.png` (remove suffix)
-4. Delete or keep other candidates (configurable)
-5. Create `illustrations/_manifest.md` with metadata
-
-# Illustration Language
-
-**All text labels, annotations, and captions in diagrams MUST match the document language.**
-
-The Orchestrator passes the document language (e.g., `Russian`, `English`). Apply it as follows:
-- All labels inside diagram zones → in document language
-- All captions (`![Рис. N. ...]`) → in document language
-- Prompt meta-instructions (style, layout) → always in English (gpt-image-1 understands English prompts best)
-- Add to every Golden Schema prompt: `"All visible text labels and annotations in the image must be in {language}."`
-
-Example: if document is in Russian, a zone label should be `"Оркестратор"` not `"Orchestrator"`, and the caption should be `"Рис. 1. Архитектура системы"` not `"Fig. 1. System Architecture"`.
+After generating all illustrations, create `illustrations/_manifest.md` with metadata.
 
 # Illustration Source: Analyst Placeholders
 
@@ -80,18 +62,15 @@ Create `illustrations/_manifest.md`:
 ```markdown
 # Illustrations Manifest
 
-| # | File | Document Section | Type | Candidates | Selected |
-|---|------|-----------------|------|-----------|---------|
-| 1 | diagram_1.png | §3. Architecture | architecture | 3 | B (vertical) |
+| # | File | Document Section | Type |
+|---|------|-----------------|------|
+| 1 | diagram_1.png | §3. Architecture | architecture |
 
 ## Descriptions
 ### diagram_1.png
 **Section:** 3. Architecture
 **Description:** [General text description]
-**Prompt A:** [prompt] 
-**Prompt B:** [prompt] ✓ SELECTED
-**Prompt C:** [prompt]
-**Reason for selection:** [Why this prompt/candidate was chosen]
+**Prompt:** [the prompt used]
 ```
 
 # Prompt Engineering Rules

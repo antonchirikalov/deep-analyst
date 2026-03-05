@@ -75,7 +75,6 @@ Phase 5: Delivery
 1. Activate Illustrator with:
    - **Output folder path:** `generated_docs_[TIMESTAMP]/`
    - **Draft path:** `generated_docs_[TIMESTAMP]/draft/vN.md`
-   - **Document language:** the language detected/used in Phase 0 (e.g., `Russian`, `English`)
 2. Illustrator performs its full pipeline:
    a. Reads draft → finds `<!-- ILLUSTRATION -->` placeholders from Analyst
    b. Plans PaperBanana Golden Schema prompts (2–3 variations per placeholder)
@@ -103,7 +102,7 @@ Max iterations: 3. If not approved after 3 → deliver current best with disclai
 # Phase 5: Delivery
 
 1. Copy approved draft → final document in output folder root
-2. Run `workflow-logger.py complete --folder {path} --iterations {N}` to log total elapsed time
+2. Log completion to workflow_log.md (total time, iterations, phases completed)
 3. Present final document to user
 
 # Workflow Logging

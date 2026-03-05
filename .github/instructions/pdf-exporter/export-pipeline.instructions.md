@@ -27,92 +27,44 @@ Priority order:
 
 Also locate the `illustrations/` folder relative to the document.
 
-## Step 2: Pre-process Markdown
+## Step 2: Convert to PDF
 
-Create a temporary file `_export.md` in the same directory as the source.
+Run the conversion script from the workspace root:
 
-### 2.1 Add PDF Metadata
-
-If the document doesn't start with a YAML front matter block, prepend:
-
-```yaml
----
-title: "<extracted from first H1 heading>"
-date: "<current date>"
----
+```bash
+.venv/bin/python .github/skills/pdf-exporter/scripts/md_to_pdf.py <input.md> [output.pdf]
 ```
 
-### 2.2 Fix Image Paths
+The script (`md_to_pdf.py`) handles everything automatically:
+- Strips YAML front matter if present
+- Resolves relative image paths to absolute `file://` URIs
+- Validates image file existence
+- Converts Markdown → HTML using `markdown` library (tables, fenced_code, toc, smarty, sane_lists)
+- Applies publication-quality CSS styling (A4, colored headings, zebra-striped tables, image borders, pagination, page numbers)
+- Renders HTML → PDF via `weasyprint`
 
-For every image reference in the document:
-
-```markdown
-# Before (relative)
-![Architecture](illustrations/diagram_1.png)
-
-# After (absolute)
-![Architecture](/full/absolute/path/to/illustrations/diagram_1.png)
-```
-
-**Validation:** Check that each referenced image file actually exists. If missing, add a warning comment:
-```markdown
-<!-- WARNING: Image not found: illustrations/diagram_X.png -->
-```
-
-### 2.3 Verify Illustration References
-
-All illustrations are PaperBanana PNGs in `illustrations/`. For each image reference:
-
-1. Check that the referenced PNG file exists in `illustrations/`
-2. If found → convert to absolute path for PDF rendering
-3. If missing → add a warning placeholder:
-   ```markdown
-   > **[Illustration missing: diagram_N.png]** — Image file not found.
-   ```
-4. If any `<!-- ILLUSTRATION -->` placeholders remain unreplaced, warn about unprocessed illustrations
-
-### 2.4 Validate Tables
-
-For each Markdown table:
-- Ensure the separator row exists (e.g., `|---|---|---|`)
-- Ensure all rows have the same number of columns
-- Trim excessive whitespace in cells
-
-## Step 3: Convert to PDF
-
-Call the MCP tool:
-
-```
-mcp_pdf-reader_markdown_to_pdf(
-  markdown_file_path = "<path to _export.md>",
-  pdf_file_path = "<output path>.pdf"
-)
-```
+No temporary files or manual pre-processing needed.
 
 Output file naming:
 - If source is `FINAL_REPORT.md` → `FINAL_REPORT.pdf`
 - If source is `draft/v3.md` → `draft/v3.pdf`
+- If no output path given, defaults to same name with `.pdf` extension
 - Always save in the same directory as the source
 
-## Step 4: Verify Output
+## Step 3: Verify Output
 
-1. Confirm the PDF file was created
-2. Report file size
-3. If the tool supports page count, report that too
-
-## Step 5: Clean Up
-
-- Delete the temporary `_export.md` file
-- Keep the original `.md` unchanged
+1. Confirm the PDF file was created (the script prints ✅ on success)
+2. Report file size (printed by the script)
 
 ## Error Handling
 
 | Error | Action |
 |-------|--------|
-| MCP tool unavailable | Suggest: `pandoc <file>.md -o <file>.pdf --pdf-engine=wkhtmltopdf` |
-| Images not rendering | Check if paths are absolute; suggest re-running with path fixes |
+| `weasyprint` not installed | Run: `pip install weasyprint markdown` |
+| `markdown` not installed | Run: `pip install markdown` |
+| Images not rendering | Check relative paths resolve correctly from the .md file's directory |
 | Tables broken in PDF | Simplify complex tables (remove merged cells, reduce columns) |
-| File too large for tool | Split document and convert in parts, then suggest manual merge |
+| Script not found | Path: `.github/skills/pdf-exporter/scripts/md_to_pdf.py` |
 
 ## Usage Examples
 

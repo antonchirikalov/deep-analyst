@@ -37,7 +37,6 @@ Use **3–5 colors** per diagram from this curated NeurIPS 2025 palette:
 - Clear sans-serif rendering
 - No overlapping text — labels must be inside or clearly adjacent to their element
 - Use icons/symbols instead of long text where possible
-- **All text labels must be in the document language** (passed by Orchestrator). If document is in Russian → labels in Russian. If English → English. The prompt structure itself stays in English.
 
 ### Shapes & Containers
 - **Rounded rectangles** (corner radius 8–12px) for components/modules
@@ -67,7 +66,6 @@ High-fidelity scientific schematic, technical vector illustration, clean white
 background, distinct boundaries, academic NeurIPS publication style. High resolution,
 strictly 2D flat design with subtle isometric elements. Professional pastel color
 palette. No meta-labels or structural instructions visible in the image.
-All visible text labels and annotations in the image must be in {language}.
 
 [LAYOUT CONFIGURATION]
 Selected Layout: [e.g., Three-Column Comparison / Pipeline Flow / Radial Hub]

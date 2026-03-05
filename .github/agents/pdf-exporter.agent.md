@@ -3,7 +3,7 @@
 name: PDF Exporter
 description: Converts final Markdown documents to publication-quality PDF with correct rendering of images, tables, and formatting.
 model: Claude Haiku 4.5 (copilot)
-tools: ['read_file', 'create_file', 'replace_string_in_file', 'list_dir', 'run_in_terminal', 'mcp_pdf-reader_markdown_to_pdf']
+tools: ['read_file', 'create_file', 'replace_string_in_file', 'list_dir', 'run_in_terminal']
 agents: []
 ---
 
@@ -22,37 +22,25 @@ See these instruction files for complete requirements:
 When the user asks to export a document to PDF:
 
 1. **Locate the document** — find the final `.md` file (usually `FINAL_REPORT.md` or the latest `draft/vN.md` in the `generated_docs_*` folder)
-2. **Pre-process** — create a temporary copy with fixes for PDF rendering (absolute image paths, table formatting)
-3. **Convert** — call `mcp_pdf-reader_markdown_to_pdf` with the pre-processed file
-4. **Verify** — confirm the PDF was created and report file size
-5. **Clean up** — remove temporary pre-processed file
+2. **Convert** — run the conversion script via terminal:
+   ```
+   .venv/bin/python .github/skills/pdf-exporter/scripts/md_to_pdf.py <input.md> <output.pdf>
+   ```
+   The script handles all pre-processing automatically (absolute image paths, YAML metadata, table validation).
+3. **Verify** — confirm the PDF was created and report file size
 
-# Pre-processing Rules
+# Conversion Script
 
-Before conversion, create a temporary `_export.md` with these fixes:
+The conversion is handled by `.github/skills/pdf-exporter/scripts/md_to_pdf.py`.
 
-## Image Paths
-- Convert all relative image paths to **absolute paths**
-- Example: `![](illustrations/diagram_1.png)` → `![](/<full_path>/illustrations/diagram_1.png)`
-- Verify each image file exists; warn if missing
+The script automatically:
+- Strips YAML front matter
+- Resolves relative image paths to absolute `file://` URIs
+- Converts Markdown → HTML (tables, fenced code, TOC, smart quotes)
+- Applies publication-quality CSS (A4, styled headings, zebra-striped tables, image borders, pagination)
+- Renders to PDF via WeasyPrint
 
-## Illustration References
-- All illustrations are PaperBanana PNG files in `illustrations/`
-- Ensure all `![Рис. N](illustrations/diagram_N.png)` references have correct absolute paths
-- If any `<!-- ILLUSTRATION -->` placeholders remain unreplaced, warn about missing illustrations
-
-## Tables
-- Ensure all Markdown tables have proper alignment rows (`|---|---|`)
-- Fix any broken table formatting (missing pipes, inconsistent columns)
-
-## Metadata Header
-- If not present, add a title block at the top for PDF metadata:
-  ```
-  ---
-  title: <document H1 title>
-  date: <current date>
-  ---
-  ```
+No manual pre-processing or temporary files needed.
 
 # Output
 
@@ -62,8 +50,7 @@ Save PDF next to the source document:
 
 # Rules
 
-- Never modify the original `.md` file — always work on a temporary copy
-- Delete the temporary `_export.md` after successful conversion
-- Report: output file path, file size, page count (if available)
-- If conversion fails, report the error and suggest manual alternatives (pandoc, etc.)
+- Never modify the original `.md` file
+- Report: output file path and file size
+- If conversion fails, check that `weasyprint` is installed: `pip install weasyprint markdown`
 ````

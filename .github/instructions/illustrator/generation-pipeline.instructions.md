@@ -1,16 +1,18 @@
 ---
-description: Three-phase illustration generation pipeline for Illustrator agent — Plan, Generate candidates, Select best.
+description: Two-phase illustration generation pipeline for Illustrator agent — Plan one optimized prompt, Generate one PNG per illustration.
 ---
 
 # Generation Pipeline
 
 ## Overview
 
-The Illustrator uses a three-phase pipeline inspired by PaperBanana:
+The Illustrator uses a two-phase pipeline:
 
 ```
-Phase 1: Plan (descriptions + prompts) → Phase 2: Generate (parallel candidates) → Phase 3: Select (pick best)
+Phase 1: Plan (one optimized prompt per illustration) → Phase 2: Generate (one PNG each)
 ```
+
+We generate **one image per illustration** with a single well-crafted prompt. Multi-candidate generation is wasteful: without vision-critique the "selection" is blind, and prompt variations (horizontal vs vertical layout) produce marginal differences that don't justify 2–3x the API cost.
 
 ## Phase 1: Plan
 
@@ -25,59 +27,30 @@ Phase 1: Plan (descriptions + prompts) → Phase 2: Generate (parallel candidate
    - Pipeline/workflow descriptions
    - Comparison sections with complex relationships
    - Abstract concepts that benefit from visual representation
-5. For each illustration, combine the Analyst's description with the PaperBanana Golden Schema to write 2–3 prompt variations.
-   **Critical:** Add `"All visible text labels and annotations in the image must be in {language}."` to every prompt (language passed by Orchestrator).
+5. For each illustration, craft **one optimized prompt** using the PaperBanana Golden Schema:
+   - Use the Analyst's description as the primary input
+   - Choose the best composition for the content type:
+     - **Horizontal (LR)** — flows, pipelines, timelines, sequences (default for most)
+     - **Vertical (TB)** — hierarchies, layered architectures, decision trees
+     - **Radial** — comparisons, ecosystems, hub-spoke relationships
+   - Include: all elements, connections/arrows, spatial layout, colors, shape preferences
+   - Always end with: "Clean white background, no text overlapping elements"
+6. Record the plan internally before proceeding to generation.
 
-| Aspect | Variation A | Variation B | Variation C |
-|--------|-----------|-----------|-----------|
-| **Composition** | Horizontal (LR) | Vertical (TB) | Radial |
-| **Detail level** | Minimal, clean | Medium with annotations | Detailed with explanations |
-| **Label style** | Short labels | Full names | Icons + labels |
+## Phase 2: Generate
 
-4. Record the plan internally before proceeding to generation.
+Generate **one PNG per illustration**:
 
-## Phase 2: Generate (Parallel)
-
-Generate 2–3 PNG candidates using the image-generator skill:
-
-### Single candidate:
 ```bash
-python3 .github/skills/image-generator/scripts/generate_image.py "Academic diagram: [description]" "illustrations/diagram_N_a.png"
+python3 .github/skills/image-generator/scripts/generate_image.py "Academic diagram: [description]" "illustrations/diagram_N.png"
 ```
 
-### Multiple candidates via JSON:
-Create a JSON file with prompt variations, then:
-```bash
-python3 .github/skills/image-generator/scripts/generate_image.py prompts_diagram_N.json illustrations diagram_N
-```
-
-The JSON file format:
-```json
-[
-  "Academic diagram: transformer architecture, horizontal layout, minimal labels, clean white background",
-  "Academic diagram: transformer architecture, vertical layout, detailed annotations, clean white background",
-  "Academic diagram: transformer architecture, radial layout, icons and labels, clean white background"
-]
-```
-
-## Phase 3: Select
-
-1. Review all generated candidates by comparing prompt intent to section goals
-2. Select the best candidate based on:
-   - How well the composition matches the section's information hierarchy
-   - Clarity and readability of the visual
-   - Alignment with the academic style
-3. Rename selected candidate: `diagram_N_b.png` → `diagram_N.png`
-4. Clean up non-selected candidates (optional, configurable)
-5. Create/update `illustrations/_manifest.md`
-
-## Why No Vision-Critique?
-
-Vision evaluation via API is expensive and doubles latency. Instead, we generate multiple candidates with different prompts (cheaper than critique+refine) and pick the best one by prompt quality. Empirically: 3 candidates yield better results than 1 candidate + 2 rounds of critique.
+Run one command per illustration. After all are generated, create `illustrations/_manifest.md`.
 
 ## Re-run Behavior
 
 When Orchestrator requests re-generation (after Critic flagged ILLUSTRATION_ISSUES: YES):
 1. Read the Critic's feedback to identify which diagrams need improvement
 2. Only regenerate flagged diagrams — keep approved ones
-3. Update `_manifest.md` with new entries
+3. Refine the prompt based on Critic's feedback
+4. Update `_manifest.md` with new entries
