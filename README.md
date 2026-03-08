@@ -2,162 +2,134 @@
 
 Multi-agent research pipeline for GitHub Copilot. Automates deep research, structured synthesis, publication-quality illustration generation, and peer review — producing analytical documents ready for human consumption.
 
-Built on GitHub Copilot agent mode with 6 specialized agents coordinated through a strict phase-based pipeline.
+Built on GitHub Copilot agent mode with **11 specialized agents** coordinated through a **deterministic Python-driven pipeline** (`pipeline_runner.py`). The key principle: **Python code decides what happens next, LLM agents only execute their specific task.**
+
+![Pipeline Overview](docs/images/pipeline_overview.png)
 
 ---
 
-## How It Works
+## Architecture: Convention over Orchestration
 
-The user submits a research query in Copilot Chat. The **Research Orchestrator** parses it, decomposes the topic into subtopics, and launches the pipeline:
+The central insight — borrowed from [PaperBanana](https://github.com/llmsresearch/paperbanana) — is that **LLM agents should never decide the pipeline flow**. A Python script (`pipeline_runner.py`) checks artifacts on disk and deterministically routes to the next phase. Copilot agents are pure executors.
 
-```mermaid
-flowchart TD
-    User(["👤 User Query"]) --> Orchestrator
-    
-    subgraph Phase0 ["Phase 0"]
-        Orchestrator["🎯 Orchestrator\nParse params, decompose topic"]
-    end
-    
-    Orchestrator --> Scout1["🔍 Scout"]
-    Orchestrator --> Scout2["🔍 Scout"]
-    Orchestrator --> Scout3["🔍 Scout"]
-    
-    subgraph Phase1 ["Phase 1 — Parallel Research"]
-        Scout1
-        Scout2
-        Scout3
-    end
-    
-    Scout1 --> Research[("📁 research/*.md")]
-    Scout2 --> Research
-    Scout3 --> Research
-    
-    Research --> Analyst["✍️ Analyst\nSynthesis + illustration placeholders"]
-    
-    subgraph Phase2 ["Phase 2"]
-        Analyst
-    end
-    
-    Analyst --> Draft[("📄 draft/v1.md")]
-    Draft --> Illustrator["🎨 Illustrator\nPaperBanana PNGs via gpt-image-1"]
-    
-    subgraph Phase3 ["Phase 3"]
-        Illustrator
-    end
-    
-    Illustrator --> DraftIllustrated[("📄 draft + 🖼️ illustrations/")]
-    DraftIllustrated --> Critic["🔬 Research Critic"]
-    
-    subgraph Phase4 ["Phase 4 — Review Loop"]
-        Critic
-    end
-    
-    Critic -->|APPROVED| Final(["✅ FINAL_REPORT.md"])
-    Critic -->|REVISE| Analyst
+![Deterministic Orchestration](docs/images/deterministic_orchestration.png)
+
+### How It Works
+
+```
+while True:
+    result = pipeline_runner.py next $BASE_FOLDER   # Python checks files on disk
+    # Returns JSON: {"phase": 3, "action": "analyze", "agents": [...]}
+    if result.action == "complete": break
+    launch_subagent(result.agent, result.prompt)     # Copilot agent executes
 ```
 
-**Key design decisions:**
-- Agents are **specialized**: each does one thing well (search / write / draw / review)
-- Scout runs **in parallel** — one instance per subtopic, all at once
-- Critic creates an **iterative feedback loop** — draft quality improves with each round
-- Orchestrator **never asks** for missing parameters — it applies sensible defaults
+**Why this matters:**
+- **Deterministic** — same artifacts on disk → same next phase, every time
+- **Resumable** — pipeline can crash and restart from where it left off
+- **Debuggable** — `pipeline_runner.py status` shows exactly where things stand
+- **No LLM drift** — orchestrator agent doesn't "forget" steps or reorder phases
+
+---
+
+## The 10-Phase Pipeline
+
+| Phase | Agent(s) | Parallel | What happens |
+|-------|----------|----------|-------------|
+| **0. Decompose** | Orchestrator | — | Parse user query → `params.md` + subtopic list |
+| **1. Retrieve** | Retriever × N | ✅ | Discover URLs per subtopic → `_links.md` |
+| **2. Extract** | Extractor × N | ✅ | Deep content extraction from URLs → `extract_*.md` |
+| **3. Analyze** | Analyst × N | ✅ | Per-topic structure analysis → `_structure.md` |
+| **4. Plan** | Planner × 1 | — | Merge structures into unified ToC → `toc.md` |
+| **5. Write** | Writer × M | ✅ | Write sections from ToC assignments → `_sections/*.md` |
+| **6. Edit** | Editor × 1 | — | Merge sections into cohesive document → `draft/v1.md` |
+| **7. Review** | Critic × 1 | — | Evaluate draft → APPROVED / REVISE verdict |
+| **8. Illustrate** | Illustrator × 1 | — | Generate PaperBanana PNGs → `illustrations/*.png` |
+| **9. Complete** | Orchestrator | — | Log completion, report to user |
+
+Phases 1, 2, 3, 5 run **in parallel** — one agent instance per subtopic/section.
+Phase 7 → 5 creates a **revision loop**: if the Critic says REVISE, Writers rewrite flagged sections.
 
 ---
 
 ## Agents
 
-| Agent | Purpose | Input | Output |
-|-------|---------|-------|--------|
-| **Research Orchestrator** | Coordinates the entire pipeline. Decomposes topics into subtopics, assigns priorities, launches agents in sequence, manages Critic iterations | User query | `workflow_log.md`, orchestration decisions |
-| **Scout** | Gathers raw data from the web. Uses Tavily (3-tier search), Context7 (library docs), GitHub (repos/code), HuggingFace (papers/models) | Subtopic + priority | `research/subtopic_N.md` — structured facts, data, sources |
-| **Analyst** | Synthesizes Scout research into a structured analytical document. Builds comparison tables, draws conclusions, inserts illustration placeholders | Research files + params | `draft/vN.md` — full document draft |
-| **Illustrator** | Generates publication-quality PNG diagrams using the PaperBanana method. Reads Analyst's placeholders, creates Golden Schema prompts, generates via gpt-image-1 | Draft with placeholders | `illustrations/*.png` + updated draft |
-| **Research Critic** | Peer review. Checks logical coherence, source quality, topic coverage, illustration relevance. Returns structured verdict with severity-tagged issues | Draft + research + manifest | Verdict: APPROVED / REVISE / REJECTED |
-| **PDF Exporter** | Converts the final Markdown document to PDF, verifying all image references resolve | Final draft | PDF file |
+| Agent | Description |
+|-------|-------------|
+| **Deterministic Orchestrator** | Python-driven pipeline controller. Uses `pipeline_runner.py` for phase sequencing and artifact validation. The agent is a dumb executor — the Python script is the brain. |
+| **Research Orchestrator** | Legacy orchestrator with LLM-driven scheduling. Decomposes topics, manages 10 phases. Being replaced by Deterministic Orchestrator. |
+| **Retriever** | Search-only agent — discovers URLs for a single subtopic using Tavily, GitHub, HuggingFace. No content extraction. |
+| **Extractor** | Deep content extraction — reads URLs from `_links.md` and extracts full content into structured extract files via `tavily_extract` / `fetch_webpage`. |
+| **Analyst** | Per-topic structure analysis — reads all extracts for one subtopic, proposes sections, assesses depth, maps sources. |
+| **Planner** | Document architect — merges all per-topic structures into a unified Table of Contents with page budgets and source assignments. |
+| **Writer** | Per-section content writer — writes one document section from ToC assignment, source extracts, and style parameters. |
+| **Editor** | Document assembler — merges all section files into a single cohesive document with transitions, dedup, and executive summary. |
+| **Critic** | Formalized document reviewer — evaluates draft quality and produces structured APPROVED/REVISE verdict with per-section feedback. |
+| **Illustrator** | Publication-quality illustration generator using PaperBanana (`llmsresearch/paperbanana`) — supports both full pipeline (Retriever→Planner→Stylist→Visualizer↔Critic) and direct `gpt-image-1.5` mode. |
+| **PDF Exporter** | Converts final Markdown document to PDF with embedded images. |
 
-### Agent Interaction Flow
+---
 
-```mermaid
-flowchart LR
-    subgraph Orchestrator ["🎯 Orchestrator"]
-        direction TB
-        O_parse["Parse params"]
-        O_decompose["Decompose topic"]
-        O_launch["Launch pipeline"]
-        O_parse --> O_decompose --> O_launch
-    end
-    
-    O_launch --> |"subtopic + priority"| S1["🔍 Scout 1"]
-    O_launch --> |"subtopic + priority"| S2["🔍 Scout 2"]
-    O_launch --> |"subtopic + priority"| SN["🔍 Scout N"]
-    
-    S1 --> R[("📁 research/")]
-    S2 --> R
-    SN --> R
-    
-    R --> |"all research files"| A["✍️ Analyst"]
-    A --> |"draft + placeholders"| I["🎨 Illustrator"]
-    I --> |"draft + PNGs"| C["🔬 Critic"]
-    
-    C --> |"REVISE"| A
-    C --> |"APPROVED"| F(["✅ FINAL_REPORT.md"])
+## Deterministic Pipeline Runner
+
+The brain of the system is `pipeline_runner.py` — a pure Python script with zero LLM calls:
+
+```bash
+# Initialize a new research run
+python3 .github/scripts/pipeline_runner.py init
+
+# Check what phase comes next (returns JSON)
+python3 .github/scripts/pipeline_runner.py next generated_docs_20260308_133227
+
+# Show full pipeline status
+python3 .github/scripts/pipeline_runner.py status generated_docs_20260308_133227
 ```
+
+**Example output of `next`:**
+```json
+{
+  "phase": 3,
+  "phase_name": "analyze",
+  "action": "run_agents",
+  "parallel": true,
+  "agents": [
+    {"agent": "Analyst", "subtopic": "claude_code", "input": "research/claude_code/"},
+    {"agent": "Analyst", "subtopic": "copilot_agents", "input": "research/copilot_agents/"}
+  ]
+}
+```
+
+The orchestrator agent reads this JSON and launches the specified sub-agents — no interpretation, no creativity, no drift.
 
 ---
 
 ## Research Parameters
 
-All parameters are **optional** — the Orchestrator parses what it can from the query and applies defaults for the rest. **It never asks the user.**
+All parameters are **optional** — the Orchestrator parses what it can from the query and applies defaults. **It never asks the user.**
 
 | Parameter | Values | Default | Description |
 |-----------|--------|---------|-------------|
-| **Document type** | `comparison`, `overview`, `sota`, `report` | Auto-detected from query | Determines document template and structure |
-| **Size** | `brief` (15-20 pages), `standard` (30-40 pages), `detailed` (60-100 pages) | `standard` | Controls document length. Includes illustrations. |
-| **Search depth** | `quick`, `normal`, `deep` | Auto-derived from size | Controls Tavily search aggressiveness (see below) |
-| **Illustrations** | `on` / `off` | Always ON | Disable only with explicit `no illustrations` / `text only` |
+| **Size** | `brief` (5-8 pages), `standard` (15-20 pages), `detailed` (25-30 pages) | `standard` | Controls document length |
 | **Language** | Any | Detected from query text | Output language matches the query language |
-
-### Search Depth → Tavily Behavior
-
-Search depth controls how deep each Scout goes:
-
-| Depth | Subtopic Priorities | Tavily Tiers | `tavily_research` |
-|-------|--------------------|--------------|--------------------|
-| `quick` | All `quick` | Level 1 only (basic, 5 results) | ❌ |
-| `normal` | Mix `high` + `normal` | Levels 1-2 (basic + advanced) | ❌ |
-| `deep` | **All `high`** | Levels 1-2-3 (full budget) | ✅ per subtopic |
-
-**Auto-mapping when search depth is not set:**
-- `brief` → `normal`
-- `standard` → `normal`
-- `detailed` → `deep` (all subtopics get full Tavily budget including `tavily_research`)
+| **Audience** | `technical`, `executive`, `general` | Inferred from context | Determines depth and jargon level |
+| **Tone** | `academic`, `business`, `conversational` | Inferred from context | Writing style |
 
 ---
 
 ## PaperBanana Illustration System
 
-All illustrations are generated as **publication-quality PNG diagrams** using the PaperBanana method — no Mermaid, no code-based diagrams, no screenshots.
+All illustrations are generated as **publication-quality PNG diagrams** using the [PaperBanana](https://github.com/llmsresearch/paperbanana) package — no Mermaid, no code-based diagrams, no screenshots.
 
-**How it works:**
+**Two modes:**
 
-1. **Analyst** inserts `<!-- ILLUSTRATION -->` HTML comment placeholders in the draft with detailed descriptions (200+ chars each)
-2. **Illustrator** parses these placeholders and creates **Golden Schema prompts** — zone-based structured prompts with layout configuration, zone definitions, and style meta-instructions
-3. Each prompt generates **2-3 PNG candidates** via OpenAI `gpt-image-1` (1536×1024, quality=high)
-4. Illustrator selects the best candidate per diagram and **replaces the placeholder** in the draft with an image reference
+| Mode | When to use | How |
+|------|-------------|-----|
+| **`--direct`** (default) | Architecture, pipeline, comparison, flowchart diagrams | Short 2-4 sentence prompt → `gpt-image-1.5` |
+| **Full pipeline** | Statistical plots, data visualizations | Retriever→Planner→Stylist→Visualizer↔Critic |
 
-**Visual style:** NeurIPS 2025 academic aesthetic — flat vector, 2D, white background, pastel palette, clean typography. No gradients, no 3D, no photo-realism.
+**`--direct` mode** is used for 90%+ of illustrations because the full pipeline's Planner generates verbose text descriptions that cause the Visualizer to produce ASCII-art-like output instead of clean graphics.
 
-**Diagram language:** All text labels and annotations inside diagrams are generated **in the document language**. If the document is in Russian → diagram labels in Russian. The prompt structure itself is always in English (gpt-image-1 works best with English instructions).
-
-**Placeholder format (written by Analyst):**
-```markdown
-<!-- ILLUSTRATION: type=architecture, section="§2. System Architecture",
-     description="Three-column layout showing Copilot Agents (left), Claude Code (center),
-     OpenAI Codex (right). Each column contains stacked boxes: IDE layer, Agent layer,
-     Tool layer, Execution layer. Arrows show data flow between layers..." -->
-
-*[Рис. 1. Architecture comparison of three AI agent platforms]*
-```
+**Visual style:** Clean vector infographic, white background, soft pastel color fills, rounded rectangles, sans-serif labels, directional arrows. Looks like a polished Figma/Lucidchart export.
 
 ---
 
@@ -165,39 +137,28 @@ All illustrations are generated as **publication-quality PNG diagrams** using th
 
 ### Comparative Analysis
 ```
-@research-orchestrator
+@deterministic-orchestrator
 Compare GitHub Copilot Agents, Claude Code, and OpenAI Codex CLI.
-Type: comparative analysis, Language: Russian, Size: detailed
+Size: detailed, Language: Russian
 ```
-→ 60-100 page document with per-platform deep dives, comparison tables, architecture diagrams, pros/cons, scenario-based recommendations.
 
 ### Technology Overview
 ```
-@research-orchestrator
+@deterministic-orchestrator
 What is WebAssembly and how does it work?
 ```
-→ 30-40 page overview with architecture diagram, execution pipeline, ecosystem map, practical applications.
 
 ### State of the Art
 ```
-@research-orchestrator
-Current state of RAG systems in 2026. Size: standard
+@deterministic-orchestrator
+Current state of RAG systems in 2026
 ```
-→ Review of leading RAG approaches, evolution timeline, benchmarks, method taxonomy diagram.
 
 ### Quick Research
 ```
-@research-orchestrator
-What is LoRA? Size: brief, search depth: quick
+@deterministic-orchestrator
+What is LoRA? Size: brief
 ```
-→ 15-20 page concise overview with key concepts, minimal search time.
-
-### Non-English Research
-```
-@research-orchestrator
-Сравнение фреймворков для fine-tuning LLM: LoRA, QLoRA, DoRA
-```
-→ Full analysis in Russian (language auto-detected from query).
 
 ---
 
@@ -207,20 +168,27 @@ Each pipeline run creates a timestamped folder:
 
 ```
 generated_docs_YYYYMMDD_HHMMSS/
-├── workflow_log.md              # Full pipeline execution log with timestamps
-├── research/                    # Raw Scout findings (one file per subtopic)
-│   ├── github_copilot_agents.md
-│   ├── claude_code.md
-│   └── openai_codex_cli.md
-├── draft/                       # Document versions
-│   ├── v1.md                    # Initial Analyst draft
-│   └── v2.md                    # Post-Critic revision (if needed)
-├── illustrations/               # PaperBanana PNG diagrams
-│   ├── _manifest.md             # Diagram metadata and prompts used
-│   ├── diagram_1.png            # Final selected illustration
-│   ├── diagram_1_a.png          # Candidate A (kept for audit)
-│   └── ...
-└── FINAL_REPORT.md              # Approved document (copy of best draft version)
+├── workflow_log.md                  # Pipeline execution log with timestamps
+├── research/
+│   ├── _plan/
+│   │   ├── params.md               # Parsed research parameters
+│   │   └── toc.md                  # Unified Table of Contents (Phase 4)
+│   ├── {subtopic}/
+│   │   ├── _links.md               # Discovered URLs (Phase 1)
+│   │   ├── extract_*.md            # Extracted content (Phase 2)
+│   │   └── _structure.md           # Topic structure analysis (Phase 3)
+│   └── _sections/
+│       ├── 01_introduction.md      # Written sections (Phase 5)
+│       ├── 02_architecture.md
+│       └── ...
+├── draft/
+│   ├── v1.md                       # Merged document (Phase 6)
+│   ├── _review.md                  # Critic verdict (Phase 7)
+│   └── v2.md                       # Revised version (if REVISE)
+├── illustrations/
+│   ├── _manifest.md                # Diagram metadata
+│   └── *.png                       # PaperBanana illustrations (Phase 8)
+└── agent_trace.jsonl                # Per-step debug trace
 ```
 
 ---
@@ -232,19 +200,22 @@ generated_docs_YYYYMMDD_HHMMSS/
    ```
    OPENAI_API_KEY=sk-...
    ```
-3. Open in VS Code with GitHub Copilot extension (agent mode required)
-4. Configure MCP servers in VS Code settings:
-   - **Tavily** (required) — web search
-   - **Context7** (recommended) — library/framework documentation
-   - **GitHub** (optional) — repository search, code exploration
+3. Install Python dependencies:
+   ```bash
+   pip install "paperbanana[openai]" python-dotenv
+   ```
+4. Open in VS Code with GitHub Copilot extension (agent mode required)
+5. Configure MCP servers in VS Code settings:
+   - **Tavily** (required) — web search and content extraction
+   - **GitHub** (recommended) — repository search, code exploration
    - **HuggingFace** (optional) — paper/model search
 
 ## Requirements
 
 - VS Code with GitHub Copilot (agent mode)
 - Python 3.10+
-- OpenAI API key (for `gpt-image-1` illustrations)
-- MCP servers: Tavily (required), Context7 (recommended), GitHub & HuggingFace (optional)
+- OpenAI API key (for `gpt-image-1.5` illustrations)
+- MCP servers: Tavily (required), GitHub (recommended), HuggingFace (optional)
 
 ## License
 
