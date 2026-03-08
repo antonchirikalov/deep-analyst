@@ -19,9 +19,14 @@ The central insight — borrowed from [PaperBanana](https://github.com/llmsresea
 ```
 while True:
     result = pipeline_runner.py next $BASE_FOLDER   # Python checks files on disk
-    # Returns JSON: {"phase": 3, "action": "analyze", "agents": [...]}
-    if result.action == "complete": break
-    launch_subagent(result.agent, result.prompt)     # Copilot agent executes
+    match result.action:
+        case "orchestrator_search":  do_search(result.searches)       # Orchestrator searches directly
+        case "orchestrator_extract": do_extract(result.extractions)   # Orchestrator extracts directly
+        case "launch_parallel":      for a in result.agents:          # Launch N sub-agents
+                                         runSubagent(a.name, a.prompt)
+                                         write_file(a.output_file)
+        case "launch_single":        runSubagent(result.agent, result.prompt)
+        case "complete":             break
 ```
 
 **Why this matters:**
@@ -72,34 +77,44 @@ Phase 7 → 5 creates a **revision loop**: if the Critic says REVISE, Writers re
 
 ## Deterministic Pipeline Runner
 
-The brain of the system is `pipeline_runner.py` — a pure Python script with zero LLM calls:
+The brain of the system is `pipeline_runner.py` — a pure Python script with zero LLM calls. **You don't run it directly** — the Deterministic Orchestrator agent calls it automatically in a loop. These CLI commands are for debugging:
 
 ```bash
-# Initialize a new research run
-python3 .github/scripts/pipeline_runner.py init
+# Show full pipeline status (which phases are done, word counts, etc.)
+python3 .github/scripts/pipeline_runner.py status generated_docs_20260308_133227
 
-# Check what phase comes next (returns JSON)
+# Check what phase comes next (returns JSON with action + prompts)
 python3 .github/scripts/pipeline_runner.py next generated_docs_20260308_133227
 
-# Show full pipeline status
-python3 .github/scripts/pipeline_runner.py status generated_docs_20260308_133227
+# Initialize a new research folder (orchestrator does this automatically)
+python3 .github/scripts/pipeline_runner.py init
 ```
 
 **Example output of `next`:**
 ```json
 {
+  "action": "launch_parallel",
   "phase": 3,
-  "phase_name": "analyze",
-  "action": "run_agents",
-  "parallel": true,
+  "phase_name": "Analysis",
+  "agent_count": 2,
   "agents": [
-    {"agent": "Analyst", "subtopic": "claude_code", "input": "research/claude_code/"},
-    {"agent": "Analyst", "subtopic": "copilot_agents", "input": "research/copilot_agents/"}
+    {
+      "name": "Analyst",
+      "prompt": "You are a research Analyst. Analyze extracted content for subtopic 'claude_code'...\nRead ALL extract_*.md files in: .../research/claude_code/\n...",
+      "output_file": "research/claude_code/_structure.md",
+      "description": "Analyze claude_code"
+    },
+    {
+      "name": "Analyst",
+      "prompt": "You are a research Analyst. Analyze extracted content for subtopic 'copilot_agents'...\n...",
+      "output_file": "research/copilot_agents/_structure.md",
+      "description": "Analyze copilot_agents"
+    }
   ]
 }
 ```
 
-The orchestrator agent reads this JSON and launches the specified sub-agents — no interpretation, no creativity, no drift.
+The script generates the exact prompt for each sub-agent. The orchestrator reads this JSON, calls `runSubagent(name, prompt)`, and writes the returned text to `output_file` — no interpretation, no creativity, no drift.
 
 ---
 
@@ -135,28 +150,26 @@ All illustrations are generated as **publication-quality PNG diagrams** using th
 
 ## Typical Use Cases
 
+In VS Code Copilot Chat, select **Deterministic Orchestrator** from the agent picker, then type your query:
+
 ### Comparative Analysis
 ```
-@deterministic-orchestrator
 Compare GitHub Copilot Agents, Claude Code, and OpenAI Codex CLI.
 Size: detailed, Language: Russian
 ```
 
 ### Technology Overview
 ```
-@deterministic-orchestrator
 What is WebAssembly and how does it work?
 ```
 
 ### State of the Art
 ```
-@deterministic-orchestrator
 Current state of RAG systems in 2026
 ```
 
 ### Quick Research
 ```
-@deterministic-orchestrator
 What is LoRA? Size: brief
 ```
 
