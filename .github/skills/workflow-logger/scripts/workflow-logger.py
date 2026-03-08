@@ -7,10 +7,13 @@ Adapted for Deep Analyst 5-agent research pipeline.
 
 import argparse
 import json
+import logging
 import os
 import re
 import sys
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def get_log_path(folder: str) -> str:
@@ -28,11 +31,11 @@ def time_only() -> str:
 def append_log(folder: str, content: str) -> None:
     path = get_log_path(folder)
     if not os.path.exists(path):
-        print(f"Error: Log file not found at {path}. Run 'init' first.", file=sys.stderr)
+        logger.error("Log file not found at %s. Run 'init' first.", path)
         sys.exit(1)
     with open(path, "a") as f:
         f.write(content)
-    print(f"Log updated: {path}")
+    logger.info("Log updated: %s", path)
 
 
 def cmd_init(args):
@@ -55,7 +58,7 @@ Status: In Progress
 """
     with open(path, "w") as f:
         f.write(content)
-    print(f"Log initialized: {path}")
+    logger.info("Log initialized: %s", path)
 
 
 def cmd_params(args):
@@ -164,7 +167,7 @@ def cmd_complete(args):
 
 """
     append_log(args.folder, content)
-    print("Workflow marked as COMPLETED")
+    logger.info("Workflow marked as COMPLETED")
 
 
 def main():
@@ -222,6 +225,13 @@ def main():
     p_complete.set_defaults(func=cmd_complete)
 
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
     args.func(args)
 
 

@@ -10,9 +10,12 @@ Usage:
 
 import sys
 import os
+import logging
 import re
 import markdown
 from weasyprint import HTML
+
+logger = logging.getLogger(__name__)
 
 # ── Publication-quality CSS ──────────────────────────────────────────────────
 CSS = """
@@ -292,18 +295,23 @@ def convert_md_to_pdf(md_path: str, pdf_path: str) -> None:
     HTML(string=html_doc, base_url=md_dir).write_pdf(pdf_path)
     
     size_mb = os.path.getsize(pdf_path) / (1024 * 1024)
-    print(f"✅ PDF created: {pdf_path}")
-    print(f"   Size: {size_mb:.1f} MB")
+    logger.info("PDF created: %s (%.1f MB)", pdf_path, size_mb)
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
     if len(sys.argv) < 2:
-        print("Usage: python md_to_pdf.py <input.md> [output.pdf]")
+        logger.error("Usage: python md_to_pdf.py <input.md> [output.pdf]")
         sys.exit(1)
     
     input_file = sys.argv[1]
     if not os.path.exists(input_file):
-        print(f"❌ File not found: {input_file}")
+        logger.error("File not found: %s", input_file)
         sys.exit(1)
     
     if len(sys.argv) >= 3:

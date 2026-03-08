@@ -7,7 +7,11 @@ description: PaperBanana-style academic illustration guidelines and structured p
 
 ## Core Philosophy
 
-All illustrations MUST follow the PaperBanana approach: a **structured zone-based prompt schema** that produces NeurIPS-quality academic diagrams. The key principle is that every element, connection, color, and spatial position must be **explicitly specified** — vague descriptions produce bad results.
+All illustrations follow the **PaperBanana aesthetic standard**: NeurIPS-quality flat-vector academic diagrams with clean white backgrounds, pastel colors, and clear visual hierarchy.
+
+**Two generation modes with different prompt strategies:**
+- **Direct mode (default):** Short prompts (2-4 sentences). The script auto-prepends style instructions. Focus on visual structure and key elements — verbose prompts cause text-heavy output.
+- **Pipeline mode** (statistical/data plots only): Full structured zone-based Golden Schema prompt where every element, connection, color, and spatial position is explicitly specified.
 
 ## PaperBanana NeurIPS 2025 Aesthetic Rules
 
@@ -54,9 +58,34 @@ Use **3–5 colors** per diagram from this curated NeurIPS 2025 palette:
 - **Consistent spacing**: equal gaps between parallel elements
 - **LaTeX-compatible**: rectangular composition, no protruding elements
 
-## PaperBanana Golden Schema Prompt Format
+## Prompt Formats by Mode
 
-Every prompt MUST use this structured format:
+### Direct Mode Prompt Format (DEFAULT — for most illustrations)
+
+Keep it **short** — 2-4 sentences, ~50-100 words. The script auto-prepends vector-style instructions.
+
+```
+[Visual structure: columns/rows/hierarchy/flow direction].
+[Key blocks and their colors].
+[Connections: arrows, lines, flow].
+[Bottom/side: integration or legend elements].
+```
+
+**Example (architecture comparison):**
+```
+Three-column comparison of AI platforms. LEFT 'Copilot' in blue with hub-spoke
+model icons and cloud sandbox. CENTER 'Claude Code' in orange with Lead Agent,
+three Teammate blocks, and Shared Task Board. RIGHT 'Codex CLI' in green with
+App Server hub and client connections. Bottom: shared MCP protocol bus.
+```
+
+**Why short?** Long verbose prompts (zone-by-zone specs with exact text, positions, pixel sizes) cause the image model to render TEXT BLOCKS instead of graphics — producing ugly ASCII-art monospace output.
+
+### Pipeline Mode Prompt Format (statistical plots / data viz ONLY)
+
+> ⚠️ Do NOT use this format for architecture/comparison/flowchart diagrams — it produces text-heavy output.
+
+For pipeline mode (`--context`, no `--direct`), use the full PaperBanana Golden Schema. Every prompt MUST use this structured format:
 
 ```
 ---BEGIN PROMPT---
@@ -127,12 +156,12 @@ Connections: [...]
 
 ## What to Visualize by Document Type
 
-| Document Type | Required Illustrations |
+| Document Type | Recommended Illustrations |
 |--------------|----------------------|
-| Comparative Analysis | Architecture per approach + Visual comparison (radar/decision) |
-| Technology Overview | Architecture diagram + Dataflow pipeline |
-| State of the Art | Evolution timeline + Methods taxonomy |
-| Research Report | Methodology visualization + Results |
+| Comparative Analysis | Architecture diagram per approach + Visual comparison infographic + Decision flowchart |
+| Technology Overview | Architecture diagram + Dataflow/pipeline visualization + Sequence/flow diagram |
+| State of the Art | Visual evolution timeline + Methods taxonomy map + Mindmap of current approaches |
+| Research Report | Methodology visualization + Results comparison + Approach comparison diagram |
 
 ## Anti-Patterns
 

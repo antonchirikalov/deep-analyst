@@ -1,5 +1,6 @@
 # Environment secrets
 .env
+.venv
 
 # Generated research output (per-run folders)
 generated_docs_*/
@@ -13,3 +14,4 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .idea/
+/docs/

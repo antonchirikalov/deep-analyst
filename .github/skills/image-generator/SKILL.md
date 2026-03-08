@@ -1,22 +1,45 @@
 ---
 name: image-generator
-description: Generates publication-quality academic illustrations via OpenAI gpt-image-1. Supports single image generation and batch candidate generation with prompt variations. Use when the Illustrator agent needs to create PNG diagrams for research documents.
+description: Generates publication-quality academic illustrations using the PaperBanana package (llmsresearch/paperbanana) — a multi-agent pipeline (Retriever → Planner → Stylist → Visualizer ↔ Critic) with OpenAI as the provider.
 ---
 
-# Image Generator
+# Image Generator (PaperBanana Pipeline)
 
 ## When to use
 - When Illustrator agent needs to generate academic diagrams
 - When regenerating specific diagrams after Critic feedback
 
-## How to use
+## CRITICAL: Choosing the right mode
 
-### Generate one illustration
+### Direct generation (RECOMMENDED for architecture/technical diagrams)
 ```bash
-python3 .github/skills/image-generator/scripts/generate_image.py "Academic diagram: [description]" "illustrations/diagram_N.png"
+python3 .github/skills/image-generator/scripts/paperbanana_generate.py "[description]" "illustrations/diagram_N.png" --direct
 ```
 
-One call per illustration. Craft a single well-optimized prompt rather than generating multiple candidates — without vision-critique, candidate selection is blind and wastes API budget.
+**Use `--direct` for:** architecture diagrams, system overviews, flowcharts, comparison layouts, any diagram with boxes/arrows/structural elements.
+
+`--direct` calls gpt-image-1.5 with a concise prompt. This produces clean graphical illustrations.
+
+**Prompt guidelines for `--direct`:**
+- Keep prompts SHORT (2-4 sentences max)
+- Focus on visual structure, not exact text labels
+- Describe shapes, colors, spatial layout
+- Say "professional vector-style technical diagram" or "clean infographic style"
+- Do NOT list exact text for every label — the model will generate appropriate labels
+- Do NOT write multi-paragraph layout specs — this causes ASCII-art output
+
+### Full PaperBanana pipeline (for data visualizations / methodology figures only)
+```bash
+python3 .github/skills/image-generator/scripts/paperbanana_generate.py "[illustration description]" "illustrations/diagram_N.png" --context "[methodology text or section content]"
+```
+
+The wrapper calls the real `paperbanana` package (`PaperBananaPipeline.generate()`) with OpenAI provider:
+- **Phase 1 (Linear Planning):** Retriever → Planner → Stylist
+- **Phase 2 (Iterative Refinement):** Visualizer ↔ Critic (default 2 rounds)
+
+VLM agent (Planner/Stylist/Critic) uses `gpt-5.2`, image generation (Visualizer) uses `gpt-image-1.5`.
+
+⚠️ **WARNING:** The pipeline Planner generates extremely verbose layout descriptions. For architecture/technical diagrams, this causes the Visualizer to produce text-heavy ASCII-art-like output instead of clean graphics. Use `--direct` mode for these.
 
 ## Configuration
 
@@ -24,18 +47,17 @@ The script reads from `.env` file in project root:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENAI_API_KEY` | (required) | OpenAI API key |
-| `IMAGE_MODEL` | `gpt-image-1` | Image generation model |
-| `IMAGE_SIZE` | `1536x1024` | Output image size |
-| `IMAGE_QUALITY` | `high` | Generation quality |
-
+| `OPENAI_API_KEY` | (required) | OpenAI API key for all agents |
+| `TEXT_MODEL` | `gpt-5.2` | VLM model for Planner/Stylist/Critic |
+| `IMAGE_MODEL` | `gpt-image-1.5` | Image generation model |
+| `MAX_CRITIC_ROUNDS` | `2` | Visualizer-Critic refinement iterations |
 
 ## Dependencies
 
 ```
-pip install openai pillow python-dotenv
+pip install "paperbanana[openai]" python-dotenv
 ```
 
 ## Output
-- Generates one PNG at the specified path
-- Prints the output path on success
+- Generates one PNG at the specified path (copied from PaperBanana's `outputs/` dir)
+- All intermediate iterations and metadata saved by PaperBanana in `outputs/`

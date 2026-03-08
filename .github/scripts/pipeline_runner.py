@@ -1,0 +1,896 @@
+#!/usr/bin/env python3
+"""
+Deterministic Pipeline Runner v2 for deep-analyst research pipeline.
+
+Architecture: Orchestrator handles ALL I/O (search, extract, file writes).
+Sub-agents only RETURN text — orchestrator writes it to disk.
+
+Usage:
+    python3 .github/scripts/pipeline_runner.py init [base_folder]
+    python3 .github/scripts/pipeline_runner.py next <base_folder>
+    python3 .github/scripts/pipeline_runner.py status <base_folder>
+"""
+
+import json
+import sys
+import re
+import os
+import shutil
+from pathlib import Path
+from datetime import datetime
+
+
+# ═══════════════════════════════════════════════════════════════
+# TRANSLITERATION & SLUGIFY
+# ═══════════════════════════════════════════════════════════════
+
+_TRANSLIT = {
+    'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd', 'е': 'e', 'ё': 'yo',
+    'ж': 'zh', 'з': 'z', 'и': 'i', 'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm',
+    'н': 'n', 'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't', 'у': 'u',
+    'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch', 'ш': 'sh', 'щ': 'shch',
+    'ъ': '', 'ы': 'y', 'ь': '', 'э': 'e', 'ю': 'yu', 'я': 'ya',
+}
+
+
+def slugify(text: str) -> str:
+    text = text.lower().strip()
+    result = []
+    for ch in text:
+        if ch in _TRANSLIT:
+            result.append(_TRANSLIT[ch])
+        elif ch.isascii():
+            result.append(ch)
+    text = ''.join(result)
+    text = re.sub(r'[^a-z0-9]+', '_', text)
+    return text.strip('_')[:60]
+
+
+# ═══════════════════════════════════════════════════════════════
+# HELPERS
+# ═══════════════════════════════════════════════════════════════
+
+def count_urls(path: Path) -> int:
+    if not path.exists():
+        return 0
+    return len(re.findall(r'https?://', path.read_text(encoding='utf-8')))
+
+
+def extract_urls(path: Path) -> list:
+    """Parse URLs from _links.md, supporting multiple formats:
+    - Inline:    '1. https://example.com — Title'
+    - Multi-line: '1. **Title**\n   - URL: https://example.com'
+    - Bare:      'https://example.com'
+    """
+    if not path.exists():
+        return []
+    urls = []
+    seen = set()
+    for line in path.read_text(encoding='utf-8').splitlines():
+        # Pattern 1: numbered inline  "1. https://..."
+        m = re.match(r'\s*\d+\.\s+(https?://\S+)', line)
+        if m:
+            url = m.group(1).split(' ')[0].rstrip(',)').strip()
+            if url not in seen:
+                seen.add(url)
+                urls.append(url)
+            continue
+        # Pattern 2: "- URL: https://..." or "URL: https://..."
+        m = re.match(r'\s*[-*]?\s*(?:URL|url|Url):\s*(https?://\S+)', line)
+        if m:
+            url = m.group(1).rstrip(',)').strip()
+            if url not in seen:
+                seen.add(url)
+                urls.append(url)
+            continue
+        # Pattern 3: bare URL on its own line
+        m = re.match(r'\s*(https?://\S+)\s*$', line)
+        if m:
+            url = m.group(1).rstrip(',)').strip()
+            if url not in seen:
+                seen.add(url)
+                urls.append(url)
+    return urls
+
+
+def word_count(path: Path) -> int:
+    if not path.exists():
+        return 0
+    return len(path.read_text(encoding='utf-8').split())
+
+
+def get_subtopic_dirs(base: Path) -> list:
+    research = base / "research"
+    if not research.exists():
+        return []
+    return sorted([
+        d for d in research.iterdir()
+        if d.is_dir() and d.name != "_plan"
+    ])
+
+
+def parse_params(base: Path) -> dict:
+    params_file = base / "research" / "_plan" / "params.md"
+    if not params_file.exists():
+        return {}
+    text = params_file.read_text(encoding='utf-8')
+    params = {}
+
+    for line in text.splitlines():
+        m = re.match(r'-\s+\*\*(.+?):?\*\*:?\s*(.+)', line)
+        if m:
+            key = m.group(1).strip().lower()
+            val = m.group(2).strip()
+            params[key] = val
+
+    for key in ['max pages', 'max_pages']:
+        if key in params and isinstance(params[key], str):
+            m2 = re.search(r'(\d+)', params[key])
+            if m2:
+                params['max_pages'] = int(m2.group(1))
+                break
+
+    subtopics = []
+    in_sub = False
+    for line in text.splitlines():
+        if re.search(r'##\s*(Subtopics|Подтемы)', line, re.IGNORECASE):
+            in_sub = True
+            continue
+        if in_sub:
+            m3 = re.match(r'\s*\d+\.\s+(.+)', line)
+            if m3:
+                subtopics.append(m3.group(1).strip())
+            elif line.strip().startswith('#'):
+                break
+    params['subtopics'] = subtopics
+    params['topic'] = params.get('topic', params.get('тема', 'Research'))
+    return params
+
+
+def parse_toc_sections(base: Path) -> list:
+    toc_file = base / "research" / "_plan" / "toc.md"
+    if not toc_file.exists():
+        return []
+    text = toc_file.read_text(encoding='utf-8')
+    sections = []
+    current = None
+
+    for line in text.splitlines():
+        m = re.match(r'##\s+0*(\d+)\.\s+(.+)', line)
+        if m:
+            if current:
+                sections.append(current)
+            num = m.group(1).zfill(2)
+            rest = m.group(2)
+            title = re.split(r'\s*[—–-]\s*(?:Pages?|Стр|Sources?|Источник)', rest, flags=re.IGNORECASE)[0].strip()
+            pm = re.search(r'(?:Pages?|Стр)[:\s]*(\d+)', rest, re.IGNORECASE)
+            pages = int(pm.group(1)) if pm else 2
+            sm = re.search(r'(?:Sources?|Источник\w*)[:\s]*(.+?)(?:\s*[—–-]|$)', rest, re.IGNORECASE)
+            sources = sm.group(1).strip() if sm else ""
+            slug = slugify(title)
+            current = {
+                "num": num, "title": title, "pages": pages,
+                "words": pages * 300, "sources": sources,
+                "filename": f"{num}_{slug}.md", "slug": slug,
+            }
+        elif current:
+            pm = re.match(r'\s*(?:Pages?|Стр)[:\s]*(\d+)', line, re.IGNORECASE)
+            if pm:
+                current["pages"] = int(pm.group(1))
+                current["words"] = current["pages"] * 300
+            sm = re.match(r'\s*(?:Sources?|Источник\w*)[:\s]*(.+)', line, re.IGNORECASE)
+            if sm:
+                current["sources"] = sm.group(1).strip()
+
+    if current:
+        sections.append(current)
+    return sections
+
+
+def parse_verdict(base: Path) -> str:
+    review = base / "draft" / "_review.md"
+    if not review.exists():
+        return "NONE"
+    text = review.read_text(encoding='utf-8')
+    if re.search(r'Verdict.*APPROVED', text, re.IGNORECASE):
+        return "APPROVED"
+    if re.search(r'Verdict.*REVISE', text, re.IGNORECASE):
+        return "REVISE"
+    return "UNKNOWN"
+
+
+def find_section_file(sections_dir: Path, num: str):
+    if not sections_dir.exists():
+        return None
+    for f in sections_dir.glob("*.md"):
+        if f.stem.startswith(num) or f.stem.startswith(str(int(num))):
+            return f
+    return None
+
+
+def load_retries(base: Path) -> dict:
+    f = base / ".retries.json"
+    if f.exists():
+        return json.loads(f.read_text())
+    return {}
+
+
+def save_retries(base: Path, retries: dict):
+    (base / ".retries.json").write_text(json.dumps(retries))
+
+
+def can_retry(base: Path, key: str, max_retries: int = 2) -> bool:
+    retries = load_retries(base)
+    count = retries.get(key, 0)
+    if count >= max_retries:
+        return False
+    retries[key] = count + 1
+    save_retries(base, retries)
+    return True
+
+
+def revision_count(base: Path) -> int:
+    return len(list(base.glob("draft/_review_v*.md")))
+
+
+# ═══════════════════════════════════════════════════════════════
+# PROMPT BUILDERS — sub-agents READ files, RETURN text
+# Orchestrator writes the returned text to output_file
+# ═══════════════════════════════════════════════════════════════
+
+def prompt_analyst(base: Path, subtopic_slug: str, main_topic: str) -> str:
+    return (
+        f'You are a research Analyst. Analyze extracted content for subtopic '
+        f'"{subtopic_slug.replace("_", " ")}".\n'
+        f'Overall research topic: "{main_topic}"\n\n'
+        f'Read ALL extract_*.md files in: {base}/research/{subtopic_slug}/\n\n'
+        f'YOUR TASK:\n'
+        f'1. Analyze depth of each extract\n'
+        f'2. Propose document sections from these extracts\n'
+        f'3. Mark each: DEEP (enough for 2000+ words) or SHALLOW\n'
+        f'4. Map which extract files support which sections\n'
+        f'5. Note gaps in coverage\n\n'
+        f'RETURN your analysis as markdown. Start directly with content.'
+    )
+
+
+def prompt_planner(base: Path) -> str:
+    return (
+        f'You are a research Planner. Build a unified Table of Contents.\n\n'
+        f'Read these files:\n'
+        f'- {base}/research/_plan/params.md (topic, max_pages, audience, language)\n'
+        f'- All {base}/research/*/_structure.md files\n\n'
+        f'FORMAT (MANDATORY — pipeline parses with regex):\n'
+        f'## NN. Section Title — Pages: N — Sources: subtopic_folder1, subtopic_folder2\n\n'
+        f'Example:\n'
+        f'## 01. Introduction — Pages: 2 — Sources: all\n'
+        f'## 02. GitHub Copilot Architecture — Pages: 4 — Sources: github_copilot_coding_agent_architecture\n\n'
+        f'Total pages MUST match max_pages from params.md (+-1).\n'
+        f'1 page = 300 words.\n\n'
+        f'RETURN the ToC as markdown. Start directly with content.'
+    )
+
+
+def prompt_writer(base: Path, section: dict, is_revision: bool = False) -> str:
+    words = section["words"]
+    revision_note = ""
+    if is_revision:
+        reviews = sorted(base.glob("draft/_review_v*.md"))
+        if reviews:
+            revision_note = (
+                f'\n\nREVISION MODE: Read {reviews[-1]} for Critic feedback. '
+                f'Address ALL feedback. Revision #{len(reviews)}.'
+            )
+
+    return (
+        f'You are a technical Writer. Write one section of a research document.\n\n'
+        f'Section: {section["num"]}. {section["title"]}\n'
+        f'Page budget: {section["pages"]} pages ({words} words MINIMUM)\n\n'
+        f'Read these files:\n'
+        f'- {base}/research/_plan/params.md (language, audience, tone)\n'
+        f'- Source extracts in: {section["sources"]} '
+        f'(read extract_*.md files in those subtopic folders under {base}/research/)\n'
+        f'{revision_note}\n\n'
+        f'MANDATORY RULES:\n'
+        f'1. WORD COUNT: Section MUST be at least {words} words.\n'
+        f'2. TECHNICAL DEPTH: Include ALL technical details from extracts — '
+        f'code blocks, JSON, file paths, CLI commands. Copy VERBATIM.\n'
+        f'3. ILLUSTRATION PLACEHOLDERS: At least 1 per 2+ page section:\n'
+        f'   <!-- ILLUSTRATION: type="architecture|comparison|pipeline", '
+        f'section="{section["num"]}. {section["title"]}", '
+        f'description="Detailed description of visualization" -->\n'
+        f'4. NO FILLER: Ban "мощный", "инновационный", "comprehensive", "революционный".\n'
+        f'5. LANGUAGE: Write in the language from params.md.\n\n'
+        f'RETURN the section as markdown starting with ## heading. No preamble.'
+    )
+
+
+def prompt_editor(base: Path) -> str:
+    return (
+        f'You are a document Editor. Merge all sections into one cohesive document.\n\n'
+        f'Read these files:\n'
+        f'- {base}/research/_plan/toc.md (section order)\n'
+        f'- {base}/research/_plan/params.md (language, title)\n'
+        f'- All files in {base}/draft/_sections/ (in NN_ order)\n\n'
+        f'RULES:\n'
+        f'- Maintain ToC order (01, 02, 03...)\n'
+        f'- Add # title and executive summary at top\n'
+        f'- Add transitions between sections\n'
+        f'- Remove duplicated content (keep fullest version)\n'
+        f'- Preserve ALL <!-- ILLUSTRATION: ... --> placeholders\n'
+        f'- Do NOT reduce word count\n\n'
+        f'RETURN the merged document as markdown. Start with # title.'
+    )
+
+
+def prompt_critic(base: Path, max_pages: int) -> str:
+    min_words = int(max_pages * 300 * 0.8)
+    return (
+        f'You are a document Critic. Review the draft for quality.\n\n'
+        f'Read these files:\n'
+        f'- {base}/draft/v1.md (draft)\n'
+        f'- {base}/research/_plan/params.md (parameters)\n'
+        f'- {base}/research/_plan/toc.md (page budgets)\n\n'
+        f'CRITICAL RULES:\n'
+        f'1. If document <{min_words} words for {max_pages}-page target -> REVISE.\n'
+        f'2. If ANY section mentions concepts without explaining HOW -> REVISE.\n'
+        f'3. Check filler language ("мощный", "comprehensive" without substance).\n'
+        f'4. Check section word counts vs ToC budgets (+-15%).\n'
+        f'5. Check for duplicated content.\n'
+        f'6. Verdict: ## Verdict: APPROVED or ## Verdict: REVISE\n'
+        f'7. If REVISE: list specific sections and issues.\n\n'
+        f'RETURN your review as markdown. No preamble.'
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+# COMMANDS
+# ═══════════════════════════════════════════════════════════════
+
+def cmd_init(base_folder: str) -> dict:
+    base = Path(base_folder).resolve()
+    (base / "research" / "_plan").mkdir(parents=True, exist_ok=True)
+    (base / "draft" / "_sections").mkdir(parents=True, exist_ok=True)
+    (base / "illustrations").mkdir(parents=True, exist_ok=True)
+    return {
+        "status": "ready",
+        "folder": str(base),
+        "next_step": "Write research/_plan/params.md, then run next",
+    }
+
+
+def cmd_next(base_folder: str) -> dict:
+    base = Path(base_folder).resolve()
+    if not base.exists():
+        return {"action": "error", "message": f"Folder {base} does not exist."}
+
+    params = parse_params(base)
+
+    # ── Phase 0 ──
+    if not params or not params.get('subtopics'):
+        return {
+            "action": "agent_task", "phase": 0,
+            "phase_name": "Decomposition",
+            "message": "Write research/_plan/params.md with Topic, Max pages, Subtopics.",
+        }
+
+    main_topic = params.get('topic', 'Research')
+    max_pages = params.get('max_pages', 25)
+    subtopics = params['subtopics']
+
+    for st in subtopics:
+        slug = slugify(st)
+        (base / "research" / slug).mkdir(parents=True, exist_ok=True)
+
+    subtopic_dirs = get_subtopic_dirs(base)
+
+    # ═══════════ Phase 1: Retrieval — ORCHESTRATOR searches ═══════════
+    missing_links = [d for d in subtopic_dirs if not (d / "_links.md").exists()]
+    if missing_links:
+        searches = []
+        for d in missing_links:
+            name = d.name.replace('_', ' ')
+            searches.append({
+                "query": f"{name} technical deep dive documentation",
+                "query_alt": f"{name} guide tutorial overview",
+                "subtopic": d.name,
+                "output_file": str((d / "_links.md").relative_to(base)),
+            })
+        return {
+            "action": "orchestrator_search",
+            "phase": 1, "phase_name": "Retrieval",
+            "count": len(searches),
+            "searches": searches,
+            "instructions": (
+                "For EACH search: call tavily_search(query, max_results=10). "
+                "Format results as numbered list: 'N. URL — Title'. "
+                "Write to output_file in BASE_FOLDER. "
+                "If tavily fails, try query_alt. "
+                "If both fail, use fetch_webpage on known documentation URLs."
+            ),
+        }
+
+    # ── Validate Phase 1 ──
+    weak_links = []
+    for d in subtopic_dirs:
+        if count_urls(d / "_links.md") < 3:
+            weak_links.append({
+                "subtopic": d.name,
+                "urls": count_urls(d / "_links.md"),
+                "output_file": str((d / "_links.md").relative_to(base)),
+            })
+    if weak_links and can_retry(base, "phase_1_urls"):
+        return {
+            "action": "orchestrator_search",
+            "phase": 1, "phase_name": "Retrieval (retry)",
+            "count": len(weak_links),
+            "searches": [{
+                "query": f"{w['subtopic'].replace('_', ' ')} detailed technical guide",
+                "query_alt": f"{w['subtopic'].replace('_', ' ')} documentation tutorial",
+                "subtopic": w["subtopic"],
+                "output_file": w["output_file"],
+                "append": True,
+            } for w in weak_links],
+            "instructions": "RETRY: Too few URLs. Broaden queries. Append to existing file.",
+        }
+
+    # ═══════════ Phase 2: Extraction — ORCHESTRATOR extracts (per-subtopic batching) ═══════════
+    missing_extracts = [d for d in subtopic_dirs if not list(d.glob("extract_*.md"))]
+    if missing_extracts:
+        # Process ONE subtopic at a time to avoid overwhelming the orchestrator
+        d = missing_extracts[0]
+        urls = extract_urls(d / "_links.md")
+        extractions = []
+        for i, url in enumerate(urls, 1):
+            extractions.append({
+                "url": url,
+                "subtopic": d.name,
+                "index": i,
+                "output_file": str((d / f"extract_{i}.md").relative_to(base)),
+            })
+        remaining = len(missing_extracts) - 1
+        return {
+            "action": "orchestrator_extract",
+            "phase": 2, "phase_name": f"Extraction ({d.name})",
+            "count": len(extractions),
+            "remaining_subtopics": remaining,
+            "extractions": extractions,
+            "instructions": (
+                f"Extract content from {len(extractions)} URLs for subtopic '{d.name}'. "
+                f"{remaining} more subtopics after this one.\n"
+                "For EACH URL:\n"
+                "1. Call fetch_webpage(url=URL) to get full page content\n"
+                "2. Write FULL extracted content (1500-4000 words) to the output_file\n"
+                "3. Header format: # Extract: [title]\\nSource: [url]\\nWords: ~N\\n\\n[content]\n"
+                "4. COPY content verbatim — do NOT summarize or paraphrase\n"
+                "5. Preserve ALL code blocks, JSON examples, CLI commands, file paths, configs\n"
+                "6. Skip URLs that return errors (403/404/timeout) — continue to next\n"
+                "CRITICAL: Write a SEPARATE file for EACH URL. Each extract must be 1500+ words."
+            ),
+        }
+
+    # ── Validate Phase 2 ──
+    extract_issues = []
+    for d in subtopic_dirs:
+        exts = list(d.glob("extract_*.md"))
+        urls = count_urls(d / "_links.md")
+        n_ext = len(exts)
+        avg_wc = sum(word_count(e) for e in exts) / max(n_ext, 1)
+        # Flag if too few extracts: require at least 50% URL coverage, minimum 3
+        if n_ext < max(int(urls * 0.5), 3):
+            extract_issues.append({
+                "subtopic": d.name, "extracts": n_ext, "urls": urls,
+                "avg_words": int(avg_wc),
+                "issue": f"Only {n_ext} extracts from {urls} URLs (need {max(int(urls * 0.5), 3)})",
+            })
+        # Flag if extracts are too shallow (< 800 words average)
+        elif n_ext > 0 and avg_wc < 800:
+            extract_issues.append({
+                "subtopic": d.name, "extracts": n_ext, "urls": urls,
+                "avg_words": int(avg_wc), "issue": f"Too shallow (avg {int(avg_wc)}w, need 800+)",
+            })
+
+    if extract_issues and can_retry(base, "phase_2_quality"):
+        # Batch retry by subtopic — process ONE subtopic at a time
+        issue = extract_issues[0]
+        d = base / "research" / issue["subtopic"]
+        urls = extract_urls(d / "_links.md")
+        existing_indices = set()
+        for e in d.glob("extract_*.md"):
+            m = re.match(r'extract_(\d+)\.md', e.name)
+            if m:
+                existing_indices.add(int(m.group(1)))
+        extractions = []
+        for i, url in enumerate(urls, 1):
+            if i not in existing_indices:
+                extractions.append({
+                    "url": url, "subtopic": issue["subtopic"],
+                    "index": i,
+                    "output_file": str((d / f"extract_{i}.md").relative_to(base)),
+                })
+        if extractions:
+            remaining = len(extract_issues) - 1
+            return {
+                "action": "orchestrator_extract",
+                "phase": 2, "phase_name": f"Extraction (retry: {issue['subtopic']})",
+                "count": len(extractions),
+                "remaining_issues": remaining,
+                "extractions": extractions,
+                "issues": extract_issues,
+                "instructions": (
+                    f"RETRY extraction for '{issue['subtopic']}': {issue['issue']}.\n"
+                    f"{remaining} more subtopics with issues after this one.\n"
+                    "Extract each URL into a SEPARATE file. COPY content verbatim. "
+                    "Each extract MUST be 1500+ words. Do NOT summarize."
+                ),
+            }
+
+    # ═══════════ Phase 3: Analysis — sub-agent returns text ═══════════
+    missing_structures = [d for d in subtopic_dirs if not (d / "_structure.md").exists()]
+    if missing_structures:
+        agents = []
+        for d in missing_structures:
+            agents.append({
+                "name": "Analyst",
+                "prompt": prompt_analyst(base, d.name, main_topic),
+                "output_file": str((d / "_structure.md").relative_to(base)),
+                "description": f"Analyze {d.name}",
+            })
+        return {
+            "action": "launch_parallel",
+            "phase": 3, "phase_name": "Analysis",
+            "agent_count": len(agents), "agents": agents,
+        }
+
+    # ═══════════ Phase 4: Planning — sub-agent returns text ═══════════
+    if not (base / "research" / "_plan" / "toc.md").exists():
+        return {
+            "action": "launch_single",
+            "phase": 4, "phase_name": "Planning",
+            "agent": "Planner",
+            "prompt": prompt_planner(base),
+            "output_file": "research/_plan/toc.md",
+            "description": "Build unified ToC",
+        }
+
+    # ── Validate Phase 4 ──
+    toc_sections = parse_toc_sections(base)
+    if not toc_sections:
+        if can_retry(base, "phase_4_parse"):
+            (base / "research" / "_plan" / "toc.md").unlink()
+            return {
+                "action": "launch_single",
+                "phase": 4, "phase_name": "Planning (retry)",
+                "agent": "Planner",
+                "prompt": prompt_planner(base) + (
+                    "\nRETRY: Previous ToC unparseable. "
+                    "Use EXACTLY: ## NN. Title — Pages: N — Sources: path1, path2"
+                ),
+                "output_file": "research/_plan/toc.md",
+                "description": "Retry ToC",
+            }
+        return {"action": "error", "message": "ToC unparseable."}
+
+    # ═══════════ Phase 5: Writing — sub-agents return text ═══════════
+    sections_dir = base / "draft" / "_sections"
+    missing_sections = []
+    for s in toc_sections:
+        if not find_section_file(sections_dir, s["num"]):
+            missing_sections.append(s)
+
+    is_rev = revision_count(base) > 0
+
+    if missing_sections:
+        agents = []
+        for s in missing_sections:
+            agents.append({
+                "name": "Writer",
+                "prompt": prompt_writer(base, s, is_revision=is_rev),
+                "output_file": f"draft/_sections/{s['filename']}",
+                "description": f"Write section {s['num']}. {s['title']}",
+            })
+        return {
+            "action": "launch_parallel",
+            "phase": 5, "phase_name": "Writing" + (" (revision)" if is_rev else ""),
+            "agent_count": len(agents), "agents": agents,
+        }
+
+    # ── Validate Phase 5 ──
+    underweight = []
+    for s in toc_sections:
+        f = find_section_file(sections_dir, s["num"])
+        if f and word_count(f) < s["words"] * 0.5:
+            underweight.append({
+                "section": f"{s['num']}. {s['title']}",
+                "actual": word_count(f), "target": s["words"],
+            })
+
+    if underweight and can_retry(base, "phase_5_wordcount"):
+        agents = []
+        for uw in underweight:
+            s = next(x for x in toc_sections if x["num"] == uw["section"][:2])
+            bad = find_section_file(sections_dir, s["num"])
+            if bad:
+                bad.unlink()
+            agents.append({
+                "name": "Writer",
+                "prompt": prompt_writer(base, s, is_revision=is_rev) +
+                    f"\nCRITICAL RETRY: Previous was {uw['actual']} words (need {uw['target']}). Write MORE.",
+                "output_file": f"draft/_sections/{s['filename']}",
+                "description": f"Retry section {s['num']}",
+            })
+        return {
+            "action": "retry",
+            "phase": 5, "phase_name": "Writing (retry)",
+            "issues": underweight, "agents": agents,
+        }
+
+    # ═══════════ Phase 6: Editing — sub-agent returns text ═══════════
+    if not (base / "draft" / "v1.md").exists():
+        return {
+            "action": "launch_single",
+            "phase": 6, "phase_name": "Editing",
+            "agent": "Editor",
+            "prompt": prompt_editor(base),
+            "output_file": "draft/v1.md",
+            "description": "Merge sections into v1.md",
+        }
+
+    draft_wc = word_count(base / "draft" / "v1.md")
+    target_words = max_pages * 300
+
+    if draft_wc < target_words * 0.4 and can_retry(base, "phase_6_wordcount"):
+        (base / "draft" / "v1.md").unlink()
+        return {
+            "action": "launch_single",
+            "phase": 6, "phase_name": "Editing (retry)",
+            "agent": "Editor",
+            "prompt": prompt_editor(base) + f"\nCRITICAL: Target ~{target_words} words. Do NOT lose content.",
+            "output_file": "draft/v1.md",
+            "description": "Retry merge",
+        }
+
+    # ═══════════ Phase 7: Review — sub-agent returns text ═══════════
+    review_file = base / "draft" / "_review.md"
+    if not review_file.exists():
+        return {
+            "action": "launch_single",
+            "phase": 7, "phase_name": "Review",
+            "agent": "Critic",
+            "prompt": prompt_critic(base, max_pages),
+            "output_file": "draft/_review.md",
+            "description": "Review draft",
+            "info": {"draft_words": draft_wc, "target_words": target_words},
+        }
+
+    # ── Handle Verdict ──
+    verdict = parse_verdict(base)
+    if verdict == "REVISE":
+        rev_count = revision_count(base)
+        if rev_count < 2:
+            shutil.copy(review_file, base / "draft" / f"_review_v{rev_count + 1}.md")
+            review_file.unlink()
+            (base / "draft" / "v1.md").unlink(missing_ok=True)
+            for f in (base / "draft" / "_sections").glob("*.md"):
+                f.unlink()
+            return cmd_next(base_folder)
+
+    # ═══════════ Phase 8: Illustration — ORCHESTRATOR runs PaperBanana ═══════════
+    draft_text = (base / "draft" / "v1.md").read_text(encoding='utf-8')
+    has_png_refs = bool(re.search(r'!\[.*?\]\(.*?\.png\)', draft_text))
+    manifest = base / "illustrations" / "_manifest.md"
+
+    if not manifest.exists():
+        if not os.environ.get("OPENAI_API_KEY"):
+            return {
+                "action": "warning",
+                "phase": 8, "phase_name": "Illustration (skipped)",
+                "message": "OPENAI_API_KEY not set. Skipping illustrations.",
+            }
+
+        placeholders = re.findall(r'<!-- ILLUSTRATION:(.+?)-->', draft_text)
+        illustrations = []
+        for i, ph in enumerate(placeholders, 1):
+            desc_m = re.search(r'description="([^"]+)"', ph)
+            type_m = re.search(r'type="([^"]+)"', ph)
+            desc = desc_m.group(1) if desc_m else f"Technical diagram {i}"
+            itype = type_m.group(1) if type_m else "architecture"
+            illustrations.append({
+                "index": i, "type": itype, "description": desc,
+                "placeholder": f"<!-- ILLUSTRATION:{ph}-->",
+                "output_png": f"illustrations/diagram_{i}.png",
+                "embed_as": f"![Рис. {i}. {desc[:60]}](../illustrations/diagram_{i}.png)",
+            })
+
+        if not illustrations:
+            illustrations = [
+                {"index": 1, "type": "architecture",
+                 "description": "High-level architecture overview",
+                 "output_png": "illustrations/diagram_1.png",
+                 "embed_as": "![Рис. 1](../illustrations/diagram_1.png)"},
+                {"index": 2, "type": "comparison",
+                 "description": "Platform feature comparison",
+                 "output_png": "illustrations/diagram_2.png",
+                 "embed_as": "![Рис. 2](../illustrations/diagram_2.png)"},
+                {"index": 3, "type": "pipeline",
+                 "description": "Execution flow pipeline",
+                 "output_png": "illustrations/diagram_3.png",
+                 "embed_as": "![Рис. 3](../illustrations/diagram_3.png)"},
+            ]
+
+        return {
+            "action": "orchestrator_illustrate",
+            "phase": 8, "phase_name": "Illustration",
+            "count": len(illustrations),
+            "illustrations": illustrations,
+            "draft_file": "draft/v1.md",
+            "instructions": (
+                "For each illustration:\n"
+                "1. Run: python3 .github/skills/image-generator/scripts/"
+                "paperbanana_generate.py \"[short 2-4 sentence prompt]\" "
+                "\"BASE_FOLDER/[output_png]\" --direct\n"
+                "2. Embed PNG in draft/v1.md (replace placeholder or insert near section)\n"
+                "3. Write manifest to illustrations/_manifest.md\n"
+                "4. VERIFY: grep '.png' in v1.md — must find refs"
+            ),
+        }
+
+    pngs = list((base / "illustrations").glob("*.png"))
+    if pngs and not has_png_refs and can_retry(base, "phase_8_embed"):
+        manifest.unlink()
+        return {
+            "action": "orchestrator_illustrate",
+            "phase": 8, "phase_name": "Illustration (retry — embed)",
+            "count": len(pngs),
+            "illustrations": [
+                {"index": i+1, "output_png": f"illustrations/{p.name}",
+                 "embed_as": f"![Рис. {i+1}](../illustrations/{p.name})"}
+                for i, p in enumerate(pngs)
+            ],
+            "draft_file": "draft/v1.md",
+            "instructions": "PNGs exist but not in v1.md. Embed them. Rewrite manifest.",
+        }
+
+    # ═══════════ Phase 9: Delivery ═══════════
+    draft_text = (base / "draft" / "v1.md").read_text(encoding='utf-8')
+    final_wc = word_count(base / "draft" / "v1.md")
+    return {
+        "action": "complete",
+        "phase": 9, "phase_name": "Delivery",
+        "document": str(base / "draft" / "v1.md"),
+        "stats": {
+            "words": final_wc,
+            "pages_approx": round(final_wc / 300, 1),
+            "sections": len(toc_sections),
+            "extracts": sum(1 for _ in base.glob("research/*/extract_*.md")),
+            "illustrations_png": len(list((base / "illustrations").glob("*.png"))),
+            "illustrations_embedded": bool(re.search(r'!\[.*?\]\(.*?\.png\)', draft_text)),
+            "verdict": parse_verdict(base),
+            "revisions": revision_count(base),
+        },
+    }
+
+
+def cmd_status(base_folder: str) -> dict:
+    base = Path(base_folder).resolve()
+    if not base.exists():
+        return {"error": f"Folder {base} does not exist"}
+
+    params = parse_params(base)
+    subtopic_dirs = get_subtopic_dirs(base)
+    sections_dir = base / "draft" / "_sections"
+    v1 = base / "draft" / "v1.md"
+
+    status = {
+        "folder": str(base),
+        "params": {
+            "topic": params.get('topic', '?'),
+            "max_pages": params.get('max_pages', '?'),
+            "subtopics": len(params.get('subtopics', [])),
+        },
+        "phases": {},
+    }
+
+    links_info = {}
+    for d in subtopic_dirs:
+        links_info[d.name] = count_urls(d / "_links.md")
+    status["phases"]["1_retrieval"] = {
+        "topics": len(subtopic_dirs),
+        "urls_per_topic": links_info,
+        "total_urls": sum(links_info.values()),
+    }
+
+    extract_info = {}
+    for d in subtopic_dirs:
+        exts = list(d.glob("extract_*.md"))
+        extract_info[d.name] = {
+            "count": len(exts),
+            "total_words": sum(word_count(e) for e in exts),
+        }
+    status["phases"]["2_extraction"] = extract_info
+
+    status["phases"]["3_analysis"] = {
+        d.name: (d / "_structure.md").exists() for d in subtopic_dirs
+    }
+
+    toc = parse_toc_sections(base)
+    status["phases"]["4_planning"] = {
+        "has_toc": (base / "research" / "_plan" / "toc.md").exists(),
+        "sections": len(toc),
+        "total_pages": sum(s["pages"] for s in toc) if toc else 0,
+    }
+
+    section_info = {}
+    total_pl = 0
+    for s in toc:
+        f = find_section_file(sections_dir, s["num"])
+        if f:
+            wc = word_count(f)
+            pl = f.read_text(encoding='utf-8').count("<!-- ILLUSTRATION:")
+            total_pl += pl
+            section_info[s["num"]] = {
+                "file": f.name, "words": wc, "target": s["words"],
+                "pct": round(wc / max(s["words"], 1) * 100),
+            }
+        else:
+            section_info[s["num"]] = {"file": None, "words": 0, "target": s["words"]}
+    status["phases"]["5_writing"] = {"sections": section_info, "total_placeholders": total_pl}
+
+    status["phases"]["6_editing"] = {"has_draft": v1.exists(), "words": word_count(v1)}
+
+    status["phases"]["7_review"] = {
+        "has_review": (base / "draft" / "_review.md").exists(),
+        "verdict": parse_verdict(base),
+        "revisions": revision_count(base),
+    }
+
+    pngs = list((base / "illustrations").glob("*.png"))
+    dt = v1.read_text(encoding='utf-8') if v1.exists() else ""
+    status["phases"]["8_illustration"] = {
+        "png_files": len(pngs),
+        "embedded_refs": len(re.findall(r'!\[.*?\]\(.*?\.png\)', dt)),
+        "manifest": (base / "illustrations" / "_manifest.md").exists(),
+    }
+
+    status["retries"] = load_retries(base)
+    return status
+
+
+# ═══════════════════════════════════════════════════════════════
+# MAIN
+# ═══════════════════════════════════════════════════════════════
+
+def main():
+    if len(sys.argv) < 2:
+        print(json.dumps({
+            "error": "Usage: pipeline_runner.py <command> [base_folder]",
+            "commands": {
+                "init [folder]": "Create folder structure",
+                "next <folder>": "Get next pipeline action",
+                "status <folder>": "Full status report",
+            }
+        }, indent=2))
+        sys.exit(1)
+
+    command = sys.argv[1]
+
+    if command == "init":
+        folder = sys.argv[2] if len(sys.argv) >= 3 else f"generated_docs_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        result = cmd_init(folder)
+    elif command in ("next", "status"):
+        if len(sys.argv) < 3:
+            print(json.dumps({"error": f"Usage: pipeline_runner.py {command} <base_folder>"}))
+            sys.exit(1)
+        result = cmd_next(sys.argv[2]) if command == "next" else cmd_status(sys.argv[2])
+    else:
+        result = {"error": f"Unknown command: {command}"}
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        print(json.dumps({"action": "error", "message": f"Script error: {e}"}, ensure_ascii=False))
+        sys.exit(1)

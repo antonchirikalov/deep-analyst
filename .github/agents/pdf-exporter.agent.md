@@ -21,7 +21,7 @@ See these instruction files for complete requirements:
 
 When the user asks to export a document to PDF:
 
-1. **Locate the document** — find the final `.md` file (usually `FINAL_REPORT.md` or the latest `draft/vN.md` in the `generated_docs_*` folder)
+1. **Locate the document** — find the final `.md` file (usually `draft/v1.md` in the `generated_docs_*` folder)
 2. **Convert** — run the conversion script via terminal:
    ```
    .venv/bin/python .github/skills/pdf-exporter/scripts/md_to_pdf.py <input.md> <output.pdf>
@@ -53,4 +53,39 @@ Save PDF next to the source document:
 - Never modify the original `.md` file
 - Report: output file path and file size
 - If conversion fails, check that `weasyprint` is installed: `pip install weasyprint markdown`
+
+# Debug Tracing
+
+When exporting a document from a `generated_docs_[TIMESTAMP]/` folder, log steps via `agent-trace.py`:
+
+```bash
+# At start
+python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
+  --folder $BASE_FOLDER --agent "PDF Exporter" --phase 9 \
+  --action start --status ok --detail "Starting PDF export"
+
+# After reading source
+python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
+  --folder $BASE_FOLDER --agent "PDF Exporter" --phase 9 \
+  --action read --status ok --target "draft/v1.md" --words $WORD_COUNT
+
+# After generating PDF
+python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
+  --folder $BASE_FOLDER --agent "PDF Exporter" --phase 9 \
+  --action generate --status ok --target "FINAL_REPORT.pdf" \
+  --detail "PDF generated, size: N KB"
+
+# On failure
+python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
+  --folder $BASE_FOLDER --agent "PDF Exporter" --phase 9 \
+  --action generate --status fail --target "FINAL_REPORT.pdf" \
+  --detail "WeasyPrint error: ..."
+
+# At completion
+python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
+  --folder $BASE_FOLDER --agent "PDF Exporter" --phase 9 \
+  --action done --status ok --detail "PDF export complete"
+```
+
+If the source file is NOT inside a `generated_docs_*/` folder, skip tracing.
 ````

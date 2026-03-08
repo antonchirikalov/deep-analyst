@@ -21,8 +21,8 @@ Find the document to convert:
 ```
 Priority order:
 1. User-specified file path
-2. FINAL_REPORT.md in the latest generated_docs_* folder
-3. Latest draft/vN.md (highest N) in the latest generated_docs_* folder
+2. draft/v1.md in the latest generated_docs_* folder
+3. FINAL_REPORT.md in the latest generated_docs_* folder
 ```
 
 Also locate the `illustrations/` folder relative to the document.
@@ -47,7 +47,7 @@ No temporary files or manual pre-processing needed.
 
 Output file naming:
 - If source is `FINAL_REPORT.md` → `FINAL_REPORT.pdf`
-- If source is `draft/v3.md` → `draft/v3.pdf`
+- If source is `draft/v1.md` → `draft/v1.pdf`
 - If no output path given, defaults to same name with `.pdf` extension
 - Always save in the same directory as the source
 
@@ -69,8 +69,8 @@ Output file naming:
 ## Usage Examples
 
 User says:
-- "Сконвертируй отчёт в PDF" → find latest FINAL_REPORT.md, convert
-- "PDF из draft/v2.md" → convert that specific file
+- "Сконвертируй отчёт в PDF" → find latest draft/v1.md, convert
+- "PDF из draft/v1.md" → convert that specific file
 - "Экспортируй в PDF папку generated_docs_20260305_195733" → find FINAL_REPORT.md there
 
 ````
