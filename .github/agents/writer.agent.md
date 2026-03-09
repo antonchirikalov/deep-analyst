@@ -28,7 +28,9 @@ See these instruction files for complete requirements:
 
 - **Word count:** Match the page budget from ToC (pages × 300 words, ±15%). For "подробный/detailed" format, this means sections of 2000-3000 words each, NOT 500-800 words.
 - **Depth:** Explain mechanisms and internals, not just mention concepts. If the extract describes a JSON mailbox format — include the JSON structure. If it describes a directory layout — include the paths. Technical depth = concrete details.
+- **Code from extracts:** If source extracts contain code blocks, JSON schemas, CLI commands, config formats — COPY THEM VERBATIM into your section. Don't strip technical artifacts from sources.
 - **Avoid filler:** Every sentence must add information. Don't write "X is a powerful tool" — write "X processes N tokens/sec using Y architecture". No marketing language.
+- **BANNED PHRASES:** "мощный", "инновационный", "revolutionary", "comprehensive", "cutting-edge", "seamless", "robust", "powerful solution", "game-changing". Replace with specific facts.
 - **Formulas:** Minimal, always with intuitive explanation (unless params say otherwise)
 - **Language:** Write in the language specified in params.md
 - **Tone:** Match the audience specified in params.md
@@ -95,6 +97,8 @@ python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
 - Read ONLY the extract files listed in your ToC section's Sources field
 - Match the word budget from ToC (±15%)
 - Insert `<!-- ILLUSTRATION: ... -->` placeholders where visuals would help (**MANDATORY for 2+ page sections**, 200+ char descriptions)
+- **NEVER use ASCII/box-drawing diagrams** (characters like ┌─┐│└┘├┤═║). These render broken in PDF/web. Use ONLY `<!-- ILLUSTRATION: ... -->` placeholders for any visual/diagram. For simple flows, use bullet lists or numbered steps — never box art.
+- **NO TIMELINES or ROADMAPS** — do NOT invent implementation phases with specific durations ("Quick Wins 2-4 недели", "Phase 1: Week 1-2", "Фаза 3: 8-12 недель"). Your job is TECHNICAL ANALYSIS of how things work, not project management. If the user didn't explicitly ask for a migration plan or timeline, don't include one.
 - On revision, address Critic's feedback specifically — don't rewrite everything
 - Use chunked writing for sections >3000 words
 - Write in the language specified in params.md

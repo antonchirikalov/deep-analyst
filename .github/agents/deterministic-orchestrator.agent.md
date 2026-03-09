@@ -53,6 +53,7 @@ Parse the user's request and set up the pipeline:
    2. {subtopic_2}
    ...
    ```
+   **MAX 7 subtopics.** More subtopics = more URLs = context window overflow. Merge related areas.
 
 4. **Initialize logging:**
    ```bash
@@ -85,19 +86,32 @@ LOOP:
 
     ─── "orchestrator_extract" ───
       YOU perform all extractions. Do NOT delegate to sub-agents.
-      Each action processes ONE subtopic. After completing, GOTO LOOP for the next.
       For EACH extraction in parsed.extractions:
         1. Call fetch_webpage(url=extraction.url) — this is the PRIMARY tool
            (tavily_extract may be rate-limited)
-        2. The fetched content will be long (often 2000-5000 words). COPY it.
-        3. Format: "# Extract: [title]\nSource: [url]\nWords: ~N\n\n[content]"
-        4. Write to: BASE_FOLDER/extraction.output_file via create_file
-        5. MINIMUM 1500 words per extract. If fetch returns more, include ALL of it.
-        6. PRESERVE all code blocks, JSON examples, CLI commands, configs, file paths.
-        7. Skip failed URLs (403/404/timeout — log warning, continue to NEXT URL)
-      CRITICAL: Write a SEPARATE file for EACH URL. Do NOT combine URLs into one file.
-      CRITICAL: COPY content verbatim. Do NOT summarize or paraphrase.
+        2. Format: "# Extract: [title]\nSource: [url]\nWords: ~N\n\n[content]"
+        3. Write to: BASE_FOLDER/extraction.output_file via create_file
+        4. Skip failed URLs (log warning, continue)
+        5. VERIFY word count: if <200 words extracted, try tavily_extract as fallback
+      IMPORTANT: fetch_webpage is reliable. Use it for ALL extractions.
+      CRITICAL: Each extract MUST be 1500+ words. If the page has code blocks,
+      JSON schemas, API examples, directory structures — COPY THEM VERBATIM.
+      Do NOT summarize technical content. Copy the full page content minus
+      navigation/ads/footers. If your extract is <500 words from a page that
+      clearly has more content — you are extracting too little.
+      LANGUAGE: Write extracts in the SOURCE'S language (keep English if source
+      is English). NEVER translate during extraction — translation happens at
+      the Writer stage.
       Log phase. GOTO LOOP
+
+    ─── "checkpoint" ───
+      Phases 1-2 consumed most of the context budget (search + extraction).
+      STOP HERE. Tell the user:
+      "✅ Phase 1-2 complete. Extracts saved to disk.
+      To continue, start a NEW conversation and run:
+      @deterministic-orchestrator continue {BASE_FOLDER}"
+      The new conversation starts fresh with Phase 3, reading files from disk.
+      STOP.
 
     ─── "launch_parallel" ───
       For EACH agent in parsed.agents:

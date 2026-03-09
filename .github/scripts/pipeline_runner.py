@@ -20,6 +20,28 @@ from pathlib import Path
 from datetime import datetime
 
 
+def _load_dotenv():
+    """Auto-load .env from repo root if it exists."""
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    if env_path.exists():
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, _, value = line.partition("=")
+                    key, value = key.strip(), value.strip()
+                    # Strip surrounding quotes from value
+                    if value and value[0] in ('"', "'") and value[-1] == value[0]:
+                        value = value[1:-1]
+                    if key and key not in os.environ:
+                        os.environ[key] = value
+
+
+_load_dotenv()
+
+
 # ═══════════════════════════════════════════════════════════════
 # TRANSLITERATION & SLUGIFY
 # ═══════════════════════════════════════════════════════════════
@@ -56,40 +78,21 @@ def count_urls(path: Path) -> int:
     return len(re.findall(r'https?://', path.read_text(encoding='utf-8')))
 
 
-def extract_urls(path: Path) -> list:
-    """Parse URLs from _links.md, supporting multiple formats:
-    - Inline:    '1. https://example.com — Title'
-    - Multi-line: '1. **Title**\n   - URL: https://example.com'
-    - Bare:      'https://example.com'
-    """
+# Maximum URLs to extract per subtopic (controls Phase 2 context budget)
+MAX_URLS_PER_SUBTOPIC = 5
+
+
+def extract_urls(path: Path, limit: int = MAX_URLS_PER_SUBTOPIC) -> list:
     if not path.exists():
         return []
     urls = []
-    seen = set()
     for line in path.read_text(encoding='utf-8').splitlines():
-        # Pattern 1: numbered inline  "1. https://..."
         m = re.match(r'\s*\d+\.\s+(https?://\S+)', line)
         if m:
-            url = m.group(1).split(' ')[0].rstrip(',)').strip()
-            if url not in seen:
-                seen.add(url)
-                urls.append(url)
-            continue
-        # Pattern 2: "- URL: https://..." or "URL: https://..."
-        m = re.match(r'\s*[-*]?\s*(?:URL|url|Url):\s*(https?://\S+)', line)
-        if m:
-            url = m.group(1).rstrip(',)').strip()
-            if url not in seen:
-                seen.add(url)
-                urls.append(url)
-            continue
-        # Pattern 3: bare URL on its own line
-        m = re.match(r'\s*(https?://\S+)\s*$', line)
-        if m:
-            url = m.group(1).rstrip(',)').strip()
-            if url not in seen:
-                seen.add(url)
-                urls.append(url)
+            url = m.group(1).split(' ')[0].rstrip(',').strip()
+            urls.append(url)
+            if len(urls) >= limit:
+                break
     return urls
 
 
@@ -219,7 +222,7 @@ def save_retries(base: Path, retries: dict):
     (base / ".retries.json").write_text(json.dumps(retries))
 
 
-def can_retry(base: Path, key: str, max_retries: int = 2) -> bool:
+def can_retry(base: Path, key: str, max_retries: int = 1) -> bool:
     retries = load_retries(base)
     count = retries.get(key, 0)
     if count >= max_retries:
@@ -300,7 +303,14 @@ def prompt_writer(base: Path, section: dict, is_revision: bool = False) -> str:
         f'section="{section["num"]}. {section["title"]}", '
         f'description="Detailed description of visualization" -->\n'
         f'4. NO FILLER: Ban "мощный", "инновационный", "comprehensive", "революционный".\n'
-        f'5. LANGUAGE: Write in the language from params.md.\n\n'
+        f'5. NO ASCII DIAGRAMS: NEVER use box-drawing characters (┌─┐│└┘├┤═║). '
+        f'Use only <!-- ILLUSTRATION: ... --> placeholders for diagrams. '
+        f'Text-art diagrams look broken in PDF/web rendering.\n'
+        f'6. NO TIMELINES/ROADMAPS: Do NOT invent implementation phases with durations '
+        f'("Quick Wins 2-4 недели", "Phase 1: Week 1-2"). Write TECHNICAL ANALYSIS '
+        f'of how things work, not project management plans. '
+        f'If the user did not ask for a migration roadmap or timeline, DO NOT include one.\n'
+        f'7. LANGUAGE: Write in the language from params.md.\n\n'
         f'RETURN the section as markdown starting with ## heading. No preamble.'
     )
 
@@ -318,6 +328,7 @@ def prompt_editor(base: Path) -> str:
         f'- Add transitions between sections\n'
         f'- Remove duplicated content (keep fullest version)\n'
         f'- Preserve ALL <!-- ILLUSTRATION: ... --> placeholders\n'
+        f'- REMOVE any ASCII/box-drawing diagrams (┌─┐│└┘├┤═║). Replace with <!-- ILLUSTRATION: ... --> placeholder or plain text list.\n'
         f'- Do NOT reduce word count\n\n'
         f'RETURN the merged document as markdown. Start with # title.'
     )
@@ -337,8 +348,9 @@ def prompt_critic(base: Path, max_pages: int) -> str:
         f'3. Check filler language ("мощный", "comprehensive" without substance).\n'
         f'4. Check section word counts vs ToC budgets (+-15%).\n'
         f'5. Check for duplicated content.\n'
-        f'6. Verdict: ## Verdict: APPROVED or ## Verdict: REVISE\n'
-        f'7. If REVISE: list specific sections and issues.\n\n'
+        f'6. ASCII DIAGRAMS: If document contains box-drawing characters (┌─┐│└┘├┤═║) -> REVISE. These MUST be replaced with <!-- ILLUSTRATION: ... --> placeholders or removed.\n'
+        f'7. Verdict: ## Verdict: APPROVED or ## Verdict: REVISE\n'
+        f'8. If REVISE: list specific sections and issues.\n\n'
         f'RETURN your review as markdown. No preamble.'
     )
 
@@ -391,8 +403,8 @@ def cmd_next(base_folder: str) -> dict:
         for d in missing_links:
             name = d.name.replace('_', ' ')
             searches.append({
-                "query": f"{name} technical deep dive documentation",
-                "query_alt": f"{name} guide tutorial overview",
+                "query": f"{name} architecture implementation internals source code API",
+                "query_alt": f"{name} engineering blog deep dive specification protocol",
                 "subtopic": d.name,
                 "output_file": str((d / "_links.md").relative_to(base)),
             })
@@ -402,7 +414,7 @@ def cmd_next(base_folder: str) -> dict:
             "count": len(searches),
             "searches": searches,
             "instructions": (
-                "For EACH search: call tavily_search(query, max_results=10). "
+                "For EACH search: call tavily_search(query, max_results=5). "
                 "Format results as numbered list: 'N. URL — Title'. "
                 "Write to output_file in BASE_FOLDER. "
                 "If tavily fails, try query_alt. "
@@ -425,8 +437,8 @@ def cmd_next(base_folder: str) -> dict:
             "phase": 1, "phase_name": "Retrieval (retry)",
             "count": len(weak_links),
             "searches": [{
-                "query": f"{w['subtopic'].replace('_', ' ')} detailed technical guide",
-                "query_alt": f"{w['subtopic'].replace('_', ' ')} documentation tutorial",
+                "query": f"{w['subtopic'].replace('_', ' ')} official documentation API reference",
+                "query_alt": f"{w['subtopic'].replace('_', ' ')} source code internals how it works",
                 "subtopic": w["subtopic"],
                 "output_file": w["output_file"],
                 "append": True,
@@ -434,38 +446,33 @@ def cmd_next(base_folder: str) -> dict:
             "instructions": "RETRY: Too few URLs. Broaden queries. Append to existing file.",
         }
 
-    # ═══════════ Phase 2: Extraction — ORCHESTRATOR extracts (per-subtopic batching) ═══════════
+    # ═══════════ Phase 2: Extraction — ORCHESTRATOR extracts ═══════════
     missing_extracts = [d for d in subtopic_dirs if not list(d.glob("extract_*.md"))]
     if missing_extracts:
-        # Process ONE subtopic at a time to avoid overwhelming the orchestrator
-        d = missing_extracts[0]
-        urls = extract_urls(d / "_links.md")
         extractions = []
-        for i, url in enumerate(urls, 1):
-            extractions.append({
-                "url": url,
-                "subtopic": d.name,
-                "index": i,
-                "output_file": str((d / f"extract_{i}.md").relative_to(base)),
-            })
-        remaining = len(missing_extracts) - 1
+        for d in missing_extracts:
+            urls = extract_urls(d / "_links.md")
+            for i, url in enumerate(urls, 1):
+                extractions.append({
+                    "url": url,
+                    "subtopic": d.name,
+                    "index": i,
+                    "output_file": str((d / f"extract_{i}.md").relative_to(base)),
+                })
         return {
             "action": "orchestrator_extract",
-            "phase": 2, "phase_name": f"Extraction ({d.name})",
+            "phase": 2, "phase_name": "Extraction",
             "count": len(extractions),
-            "remaining_subtopics": remaining,
             "extractions": extractions,
             "instructions": (
-                f"Extract content from {len(extractions)} URLs for subtopic '{d.name}'. "
-                f"{remaining} more subtopics after this one.\n"
-                "For EACH URL:\n"
-                "1. Call fetch_webpage(url=URL) to get full page content\n"
-                "2. Write FULL extracted content (1500-4000 words) to the output_file\n"
-                "3. Header format: # Extract: [title]\\nSource: [url]\\nWords: ~N\\n\\n[content]\n"
-                "4. COPY content verbatim — do NOT summarize or paraphrase\n"
-                "5. Preserve ALL code blocks, JSON examples, CLI commands, file paths, configs\n"
-                "6. Skip URLs that return errors (403/404/timeout) — continue to next\n"
-                "CRITICAL: Write a SEPARATE file for EACH URL. Each extract must be 1500+ words."
+                "For EACH URL: call tavily_extract(urls=[url]) or fetch_webpage(url). "
+                "Write FULL content to output_file with header:\n"
+                "# Extract: [title]\nSource: [url]\nWords: ~N\n\n[content]\n"
+                "Do NOT summarize. Copy verbatim. MINIMUM 1500 words per extract. "
+                "MUST include ALL code blocks, JSON schemas, CLI commands, "
+                "API examples, directory structures, config formats from the source. "
+                "KEEP SOURCE LANGUAGE (English if source is English). "
+                "Do NOT translate during extraction. Skip failed URLs."
             ),
         }
 
@@ -475,54 +482,41 @@ def cmd_next(base_folder: str) -> dict:
         exts = list(d.glob("extract_*.md"))
         urls = count_urls(d / "_links.md")
         n_ext = len(exts)
+        # Count non-empty extracts (0-byte files don't count)
+        real_exts = [e for e in exts if word_count(e) > 50]
+        n_real = len(real_exts)
         avg_wc = sum(word_count(e) for e in exts) / max(n_ext, 1)
-        # Flag if too few extracts: require at least 50% URL coverage, minimum 3
-        if n_ext < max(int(urls * 0.5), 3):
+        if n_real < max(int(urls * 0.4), 2) and n_real < 3:
             extract_issues.append({
-                "subtopic": d.name, "extracts": n_ext, "urls": urls,
-                "avg_words": int(avg_wc),
-                "issue": f"Only {n_ext} extracts from {urls} URLs (need {max(int(urls * 0.5), 3)})",
+                "subtopic": d.name, "extracts": n_real, "urls": urls,
+                "avg_words": int(avg_wc), "issue": f"Only {n_real} non-empty from {urls} URLs",
             })
-        # Flag if extracts are too shallow (< 800 words average)
-        elif n_ext > 0 and avg_wc < 800:
+        elif avg_wc < 800:
             extract_issues.append({
                 "subtopic": d.name, "extracts": n_ext, "urls": urls,
-                "avg_words": int(avg_wc), "issue": f"Too shallow (avg {int(avg_wc)}w, need 800+)",
+                "avg_words": int(avg_wc), "issue": f"Too shallow (avg {int(avg_wc)} words, need 800+)",
             })
 
-    if extract_issues and can_retry(base, "phase_2_quality"):
-        # Batch retry by subtopic — process ONE subtopic at a time
-        issue = extract_issues[0]
-        d = base / "research" / issue["subtopic"]
-        urls = extract_urls(d / "_links.md")
-        existing_indices = set()
-        for e in d.glob("extract_*.md"):
-            m = re.match(r'extract_(\d+)\.md', e.name)
-            if m:
-                existing_indices.add(int(m.group(1)))
+    if extract_issues and can_retry(base, "phase_2_quality", max_retries=2):
         extractions = []
-        for i, url in enumerate(urls, 1):
-            if i not in existing_indices:
+        for issue in extract_issues:
+            d = base / "research" / issue["subtopic"]
+            urls = extract_urls(d / "_links.md")
+            existing = len(list(d.glob("extract_*.md")))
+            for i, url in enumerate(urls[existing:], existing + 1):
                 extractions.append({
                     "url": url, "subtopic": issue["subtopic"],
                     "index": i,
                     "output_file": str((d / f"extract_{i}.md").relative_to(base)),
                 })
         if extractions:
-            remaining = len(extract_issues) - 1
             return {
                 "action": "orchestrator_extract",
-                "phase": 2, "phase_name": f"Extraction (retry: {issue['subtopic']})",
+                "phase": 2, "phase_name": "Extraction (retry)",
                 "count": len(extractions),
-                "remaining_issues": remaining,
                 "extractions": extractions,
                 "issues": extract_issues,
-                "instructions": (
-                    f"RETRY extraction for '{issue['subtopic']}': {issue['issue']}.\n"
-                    f"{remaining} more subtopics with issues after this one.\n"
-                    "Extract each URL into a SEPARATE file. COPY content verbatim. "
-                    "Each extract MUST be 1500+ words. Do NOT summarize."
-                ),
+                "instructions": "RETRY: Extract remaining URLs. Copy verbatim.",
             }
 
     # ═══════════ Phase 3: Analysis — sub-agent returns text ═══════════
@@ -676,7 +670,17 @@ def cmd_next(base_folder: str) -> dict:
             return cmd_next(base_folder)
 
     # ═══════════ Phase 8: Illustration — ORCHESTRATOR runs PaperBanana ═══════════
-    draft_text = (base / "draft" / "v1.md").read_text(encoding='utf-8')
+    # Find the draft file — check standard path first, then fallback to root-level
+    draft_path = base / "draft" / "v1.md"
+    if not draft_path.exists():
+        # Fallback: final_article.md at root (from non-pipeline runs)
+        alt_path = base / "final_article.md"
+        if alt_path.exists():
+            draft_path = alt_path
+    if not draft_path.exists():
+        return {"action": "error", "message": f"No draft found at draft/v1.md or final_article.md"}
+
+    draft_text = draft_path.read_text(encoding='utf-8')
     has_png_refs = bool(re.search(r'!\[.*?\]\(.*?\.png\)', draft_text))
     manifest = base / "illustrations" / "_manifest.md"
 
@@ -718,26 +722,28 @@ def cmd_next(base_folder: str) -> dict:
                  "embed_as": "![Рис. 3](../illustrations/diagram_3.png)"},
             ]
 
+        draft_relpath = str(draft_path.relative_to(base))
         return {
             "action": "orchestrator_illustrate",
             "phase": 8, "phase_name": "Illustration",
             "count": len(illustrations),
             "illustrations": illustrations,
-            "draft_file": "draft/v1.md",
+            "draft_file": draft_relpath,
             "instructions": (
-                "For each illustration:\n"
-                "1. Run: python3 .github/skills/image-generator/scripts/"
-                "paperbanana_generate.py \"[short 2-4 sentence prompt]\" "
-                "\"BASE_FOLDER/[output_png]\" --direct\n"
-                "2. Embed PNG in draft/v1.md (replace placeholder or insert near section)\n"
-                "3. Write manifest to illustrations/_manifest.md\n"
-                "4. VERIFY: grep '.png' in v1.md — must find refs"
+                f"For each illustration:\n"
+                f"1. Run: python3 .github/skills/image-generator/scripts/"
+                f"paperbanana_generate.py \"[short 2-4 sentence prompt]\" "
+                f"\"BASE_FOLDER/[output_png]\" --direct\n"
+                f"2. Embed PNG in {draft_relpath} (replace placeholder or insert near section)\n"
+                f"3. Write manifest to illustrations/_manifest.md\n"
+                f"4. VERIFY: grep '.png' in {draft_relpath} — must find refs"
             ),
         }
 
     pngs = list((base / "illustrations").glob("*.png"))
     if pngs and not has_png_refs and can_retry(base, "phase_8_embed"):
         manifest.unlink()
+        draft_relpath = str(draft_path.relative_to(base))
         return {
             "action": "orchestrator_illustrate",
             "phase": 8, "phase_name": "Illustration (retry — embed)",
@@ -747,24 +753,23 @@ def cmd_next(base_folder: str) -> dict:
                  "embed_as": f"![Рис. {i+1}](../illustrations/{p.name})"}
                 for i, p in enumerate(pngs)
             ],
-            "draft_file": "draft/v1.md",
-            "instructions": "PNGs exist but not in v1.md. Embed them. Rewrite manifest.",
+            "draft_file": draft_relpath,
+            "instructions": f"PNGs exist but not in {draft_relpath}. Embed them. Rewrite manifest.",
         }
 
     # ═══════════ Phase 9: Delivery ═══════════
-    draft_text = (base / "draft" / "v1.md").read_text(encoding='utf-8')
-    final_wc = word_count(base / "draft" / "v1.md")
+    final_wc = word_count(draft_path)
     return {
         "action": "complete",
         "phase": 9, "phase_name": "Delivery",
-        "document": str(base / "draft" / "v1.md"),
+        "document": str(draft_path),
         "stats": {
             "words": final_wc,
             "pages_approx": round(final_wc / 300, 1),
             "sections": len(toc_sections),
             "extracts": sum(1 for _ in base.glob("research/*/extract_*.md")),
             "illustrations_png": len(list((base / "illustrations").glob("*.png"))),
-            "illustrations_embedded": bool(re.search(r'!\[.*?\]\(.*?\.png\)', draft_text)),
+            "illustrations_embedded": bool(re.search(r'!\[.*?\]\(.*?\.png\)', draft_path.read_text(encoding='utf-8'))),
             "verdict": parse_verdict(base),
             "revisions": revision_count(base),
         },
@@ -780,6 +785,10 @@ def cmd_status(base_folder: str) -> dict:
     subtopic_dirs = get_subtopic_dirs(base)
     sections_dir = base / "draft" / "_sections"
     v1 = base / "draft" / "v1.md"
+    if not v1.exists():
+        alt = base / "final_article.md"
+        if alt.exists():
+            v1 = alt
 
     status = {
         "folder": str(base),

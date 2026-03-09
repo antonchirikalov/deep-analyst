@@ -47,14 +47,15 @@ Write to `{BASE_FOLDER}/research/{subtopic_slug}/_links.md`:
 
 # Search Strategy
 
-1. Start with a focused query matching the subtopic
-2. Prefer: official documentation, peer-reviewed papers, GitHub repos, established tech blogs
-3. Avoid: forums, Q&A sites (unless they contain unique technical content), paywalled content
+1. Start with a focused query matching the subtopic — include terms like \"internals\", \"implementation\", \"source code\", \"API\", \"architecture\"
+2. Prefer: GitHub source code, official API documentation, engineering blogs WITH code examples, peer-reviewed papers
+3. **AVOID marketing content:** generic product comparisons, \"Top N\" listicles, news announcements without technical substance, SEO-optimized overviews
 4. If results are thin (<3 URLs), broaden:
    - Try synonyms or related terms
    - Remove restrictive qualifiers
    - Max 2 broadening attempts
 5. If still <3 URLs after broadening — write what you have, don't loop forever
+6. **For OSS tools** (Claude Code, Codex CLI, Copilot): GitHub repos with actual source code are PRIORITY #1
 
 # Debug Tracing
 
