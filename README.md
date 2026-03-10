@@ -287,24 +287,81 @@ generated_docs_YYYYMMDD_HHMMSS/
 
 ## Setup
 
-1. Clone the repo
-2. Copy `.env.example` → `.env` and add your OpenAI API key:
-   ```
-   OPENAI_API_KEY=sk-...
-   ```
-3. Open in VS Code with GitHub Copilot extension (agent mode required)
-4. Configure MCP servers in VS Code settings:
-   - **Tavily** (required) — web search
-   - **Context7** (recommended) — library/framework documentation
-   - **GitHub** (optional) — repository search, code exploration
-   - **HuggingFace** (optional) — paper/model search
+### Prerequisites
 
-## Requirements
+- **VS Code** 1.100+ with **GitHub Copilot** extension (agent mode)
+- **Python 3.10+**
+- **OpenAI API key** (for PaperBanana illustrations via `gpt-image-1.5`)
 
-- VS Code with GitHub Copilot (agent mode)
-- Python 3.10+
-- OpenAI API key (for `gpt-image-1` illustrations)
-- MCP servers: Tavily (required), Context7 (recommended), GitHub & HuggingFace (optional)
+### 1. Clone the repo
+
+```bash
+git clone https://github.com/antonchirikalov/deep-analyst.git
+```
+
+### 2. Add to your project as a secondary workspace folder
+
+Deep Analyst agents live inside `.github/agents/`. VS Code Copilot discovers agents from **all workspace folders**. Two ways to connect:
+
+**Option A — Multi-root workspace (recommended):**
+
+Open your project, then `File → Add Folder to Workspace…` → select the cloned `deep-analyst` folder. Save the workspace (`File → Save Workspace As…`). Now all 16 agents are available in Copilot Chat alongside your project files.
+
+**Option B — Symlink `.github` into your project:**
+
+```bash
+# From your project root:
+ln -s /path/to/deep-analyst/.github/agents .github/agents
+ln -s /path/to/deep-analyst/.github/instructions .github/instructions
+ln -s /path/to/deep-analyst/.github/scripts .github/scripts
+ln -s /path/to/deep-analyst/.github/skills .github/skills
+```
+
+> **Note:** Option A is cleaner — no symlinks to maintain, easy to update with `git pull`.
+
+### 3. Configure environment
+
+```bash
+cd deep-analyst
+cp .env.example .env
+# Edit .env — add your OpenAI API key:
+# OPENAI_API_KEY=sk-...
+```
+
+### 4. Configure MCP servers
+
+Add MCP servers to your VS Code settings (`settings.json`) or `.vscode/mcp.json`:
+
+```jsonc
+// .vscode/mcp.json (in your workspace)
+{
+  "servers": {
+    "tavily": {
+      "type": "http",
+      "url": "https://mcp.tavily.com/mcp",
+      "headers": { "Authorization": "Bearer YOUR_TAVILY_API_KEY" }
+    },
+    "github": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm",
+        "-e", "GITHUB_PERSONAL_ACCESS_TOKEN",
+        "ghcr.io/github/github-mcp-server"],
+      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..." }
+    }
+  }
+}
+```
+
+| MCP Server | Purpose | Required? |
+|------------|---------|-----------|
+| **Tavily** | Web search + content extraction | Recommended (fallback: `fetch_webpage`) |
+| **GitHub** | Repository search, code exploration | Optional |
+| **HuggingFace** | Paper/model search | Optional |
+| **Atlassian** | Confluence read/write | Only for Confluence publishing |
+
+### 5. Verify agents are loaded
+
+Open Copilot Chat (`Cmd+Shift+I`), type `@` and check that `research-orchestrator` and `architecture-orchestrator` appear in the agent list. If they don't — make sure the `deep-analyst` folder is in your workspace.
 
 ## License
 
