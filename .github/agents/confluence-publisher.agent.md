@@ -12,84 +12,131 @@ You are the Confluence Publisher — a standalone utility agent that publishes f
 
 **Images are uploaded via REST API (not MCP).** MCP Confluence tools do not support image upload.
 
-# Quick Start
+# Authentication — CRITICAL
 
-When the user asks to publish a document to Confluence:
+**Confluence Server/DC uses Personal Access Tokens (PAT) with Bearer auth.**
+Basic auth (`-u user:token`) DOES NOT WORK with PATs — it returns 401.
 
-1. **Locate the document** — find the final `.md` file (usually `draft/v1.md` in a `generated_docs_*` or `generated_arch_*` folder)
-2. **Get Confluence credentials** from environment:
-   ```bash
-   echo "CONFLUENCE_URL=$CONFLUENCE_URL"
-   echo "CONFLUENCE_USER=$CONFLUENCE_USER"
-   echo "CONFLUENCE_TOKEN set: $([ -n \"$CONFLUENCE_TOKEN\" ] && echo yes || echo no)"
-   ```
-   If not set, ask the user to provide them or set in `.env`.
+```
+# CORRECT — Bearer token for Server/DC PAT:
+curl -H "Authorization: Bearer $CONFLUENCE_TOKEN" ...
 
-3. **Find images** — list `illustrations/*.png` in the same folder
-4. **Create or update the page**
-5. **Upload images as attachments via REST API**
-6. **Update page content** with image references pointing to attachments
+# WRONG — basic auth fails with PATs:
+curl -u "$CONFLUENCE_USER:$CONFLUENCE_TOKEN" ...
+```
 
-# Detailed Workflow
+**Env vars** (set in `.env` or shell):
+- `CONFLUENCE_URL` — base URL, e.g. `https://confluence.scnsoft.com` (no trailing `/wiki` for Server/DC)
+- `CONFLUENCE_TOKEN` — Personal Access Token (base64 string)
+
+Note: MCP `mcp-atlassian` config uses different var names (`CONFLUENCE_PERSONAL_TOKEN`, `CONFLUENCE_USERNAME`). The publishing script uses `CONFLUENCE_URL` + `CONFLUENCE_TOKEN`.
+
+# Quick Start — Use the Publishing Script
+
+The **primary method** is the Python script that handles everything:
+
+```bash
+export CONFLUENCE_URL="https://confluence.scnsoft.com"
+export CONFLUENCE_TOKEN="<your-PAT>"
+
+.venv/bin/python scripts/publish_to_confluence.py \
+  --draft <path/to/draft/v1.md> \
+  --illustrations <path/to/illustrations/> \
+  --parent-id <parent-page-id> \
+  --space <SPACE_KEY> \
+  [--title "Custom Page Title"]
+```
+
+The script (`scripts/publish_to_confluence.py`) does:
+1. Converts markdown to Confluence storage format (XHTML) with proper HTML entity escaping
+2. Verifies parent page exists
+3. Creates child page
+4. Uploads all `*.png` files from illustrations directory as attachments
+5. Prints the published page URL
+
+**Title** defaults to the first `# H1` heading in the markdown file.
+
+# XHTML Escaping — CRITICAL
+
+Confluence storage format is strict XHTML. Text content with `<`, `>`, `&` characters (e.g. `<1 ms`, `>100K tools`, `O(K)`) MUST be HTML-escaped:
+- `<` → `&lt;`
+- `>` → `&gt;`
+- `&` → `&amp;`
+- Inside `<ac:image ac:alt="...">` attributes: also escape `"` → `&quot;`
+
+The publishing script handles this automatically. If doing manual conversion, this is the #1 source of "Error parsing xhtml" failures.
+
+# Image Handling
+
+Images in markdown: `![Alt text](../illustrations/diagram_1.png)`
+Converted to Confluence storage format:
+```xml
+<p>
+  <ac:image ac:alt="Alt text" ac:width="800">
+    <ri:attachment ri:filename="diagram_1.png" />
+  </ac:image>
+</p>
+<p><em>Alt text</em></p>
+```
+
+Images are uploaded as attachments AFTER page creation:
+- Method: `POST /rest/api/content/{pageId}/child/attachment`
+- Header: `X-Atlassian-Token: no-check` (required to bypass XSRF)
+- Content-Type: multipart/form-data
+
+# Manual Workflow (fallback if script unavailable)
 
 ## Step 1: Parse user request
 
 User provides:
-- Space key (e.g., `PROJ`, `ARCH`, `TEAM`)
-- Page title (or "update existing: {title}")
-- Optionally: parent page title
+- Document path (e.g. `generated_arch_*/draft/v1.md`)
+- Space key (e.g., `PRDCOMM00129`)
+- Parent page ID or title
+- Optionally: custom page title
 
-## Step 2: Convert Markdown to Confluence storage format
-
-Run the conversion script:
-```bash
-python3 .github/skills/confluence-publisher/scripts/md_to_confluence.py \
-  "{input_md}" "{output_html}" --images-dir "{illustrations_dir}"
-```
-
-If the script doesn't exist yet, perform inline conversion:
-1. Read the `.md` file
-2. Replace `![Caption](../illustrations/filename.png)` → `<ac:image ac:alt="Caption"><ri:attachment ri:filename="filename.png" /></ac:image>`
-3. Convert markdown headings, lists, tables, code blocks to Confluence storage format (XHTML)
-4. Write to a temp `.html` file
-
-## Step 3: Create page via REST API
+## Step 2: Verify auth
 
 ```bash
-curl -s -u "$CONFLUENCE_USER:$CONFLUENCE_TOKEN" \
-  -X POST "$CONFLUENCE_URL/rest/api/content" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "type": "page",
-    "title": "'"$PAGE_TITLE"'",
-    "space": {"key": "'"$SPACE_KEY"'"},
-    "body": {
-      "storage": {
-        "value": "'"$(cat output.html | python3 -c "import sys,json; print(json.dumps(sys.stdin.read())[1:-1])")"'",
-        "representation": "storage"
-      }
-    }
-  }'
+curl -s -H "Authorization: Bearer $CONFLUENCE_TOKEN" \
+  "$CONFLUENCE_URL/rest/api/content/<parent-id>" | python3 -m json.tool | head -5
 ```
 
-Save the returned `page_id` for attachment upload.
+If you get 401: the token is wrong or you're using basic auth instead of Bearer.
+If you get empty response: check URL format (no `/wiki` suffix for Server/DC).
 
-## Step 4: Upload images via REST API
+## Step 3: Convert and publish via script
 
-For EACH `.png` file in illustrations/:
+Always prefer the Python script. If it's not available, convert markdown inline using Python:
+
+```python
+# Read markdown, escape entities, convert to XHTML
+import re, json, sys
+from pathlib import Path
+
+md = Path("draft/v1.md").read_text()
+# Escape < > & in text (NOT in HTML tags you're generating)
+# Convert headings, tables, code blocks, images, lists
+# Write to temp file, then POST to Confluence
+```
+
+## Step 4: Upload images
+
 ```bash
-curl -s -u "$CONFLUENCE_USER:$CONFLUENCE_TOKEN" \
-  -X PUT "$CONFLUENCE_URL/rest/api/content/$PAGE_ID/child/attachment" \
-  -H "X-Atlassian-Token: nocheck" \
-  -F "file=@illustrations/filename.png" \
-  -F "comment=Architecture diagram"
+for img in illustrations/*.png; do
+  curl -s -H "Authorization: Bearer $CONFLUENCE_TOKEN" \
+    -H "X-Atlassian-Token: no-check" \
+    -X POST "$CONFLUENCE_URL/rest/api/content/$PAGE_ID/child/attachment" \
+    -F "file=@$img"
+done
 ```
+
+Note: Use **POST** (not PUT) for first-time attachment upload.
 
 ## Step 5: Verify
 
 ```bash
-curl -s -u "$CONFLUENCE_USER:$CONFLUENCE_TOKEN" \
-  "$CONFLUENCE_URL/rest/api/content/$PAGE_ID?expand=body.storage" | python3 -c "
+curl -s -H "Authorization: Bearer $CONFLUENCE_TOKEN" \
+  "$CONFLUENCE_URL/rest/api/content/$PAGE_ID?expand=version" | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 print(f'Page: {data[\"title\"]}')
@@ -97,6 +144,17 @@ print(f'URL: {data[\"_links\"][\"base\"]}{data[\"_links\"][\"webui\"]}')
 print(f'Version: {data[\"version\"][\"number\"]}')
 "
 ```
+
+# Common Errors
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| 401 Unauthorized | Basic auth with PAT | Use `Authorization: Bearer $TOKEN` header |
+| 400 "Error parsing xhtml" | Unescaped `<`, `>`, `&` in text | Escape HTML entities in all non-code text |
+| 400 "malformed start element" | Same as above — `<1 ms` becomes `<1` which looks like a tag | Same fix — escape `<` to `&lt;` |
+| Empty curl response | Wrong URL format or network issue | Check URL has no `/wiki` suffix for Server/DC |
+| 403 on attachment upload | Missing XSRF bypass header | Add `-H "X-Atlassian-Token: no-check"` |
+| `httpx` not installed | Script dependency | Run `pip install httpx` or use `.venv/bin/python` |
 
 # Updating Existing Pages
 
