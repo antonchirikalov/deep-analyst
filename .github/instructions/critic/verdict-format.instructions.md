@@ -49,14 +49,15 @@ Every review follows this exact format in `draft/_review.md`:
 ### When to REVISE
 
 - A section lacks depth (mentions concepts but doesn't explain HOW they work internally)
-- **Missing technical details:** extracts contain JSON structures, file paths, protocol specs, but the section just summarizes them in 2 sentences
+- **Missing technical details:** extracts contain JSON structures, file paths, protocol specs, API operation lists, but the section just summarizes them in 2 sentences. **Cross-check against the source extracts listed in toc.md — if ≥50% of technical artifacts are missing, this is HIGH severity.**
 - Factual gaps: key aspects of the topic are missing
-- **Filler content:** sentences like "X использует мощный подход к Y" without explaining what the approach IS
+- **Filler content:** sentences like "Х использует мощный подход к Y" without explaining what the approach IS
 - Style mismatch: wrong tone for the audience, or wrong language
-- Word count: a section is >20% over or under budget
+- Word count: a section is >30% UNDER budget while source extracts contain unused material
 - **Total document is <80% of target word count** (e.g., 5500 words for a 25-page target = REVISE)
 - **Same content appears in multiple sections** (duplication instead of depth)
 - Poor structure within a section (jumping between unrelated ideas)
+- **Section under budget is NEVER an issue if all extract material is covered.** Over budget due to depth is FINE.
 
 ### When to REJECTED
 
@@ -89,6 +90,13 @@ Do NOT flag these as issues:
 - Is the content accurate based on the source material?
 - Does each section add **unique** value? (Same content in sections 3 and 8 = duplication)
 - Is there filler/marketing language? ("мощный", "инновационный", "comprehensive", "революционный" without substance)
+
+### Extract coverage (second most important)
+- Read the source extracts assigned to each section (listed in toc.md Sources field)
+- Does the section include the key technical artifacts from those extracts?
+- **If an extract contains a JSON schema, file tree, API operation list, protocol spec, or comparison table that does NOT appear in the section → flag as HIGH severity**
+- **If a DEEP topic’s section uses <50% of unique technical material from its extracts → HIGH severity**
+- A section that turns 4500 words of detailed technical extracts into 900 words of summary is NOT acceptable
 
 ### Structure
 - Does the document flow logically from section to section?

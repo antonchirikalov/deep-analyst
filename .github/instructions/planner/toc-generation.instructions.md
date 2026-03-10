@@ -46,17 +46,39 @@ A Writer reads ONLY these files — if a relevant extract is not listed, the Wri
 
 ### Page budget allocation
 
+Budget MUST be driven by the **depth assessment** in each `_structure.md`, not uniform distribution.
+
+#### Depth-based minimum pages
+
+| Analyst depth | Min pages | Rationale |
+|---|---|---|
+| **DEEP** (3+ extracts, 3000+ words of source material) | **4 pages** | Rich material deserves full coverage |
+| **MEDIUM** (2+ extracts, decent coverage) | **2-3 pages** | Solid but not exhaustive |
+| **SHALLOW** (1 extract or thin material) | **1 page** | Merge with neighbor |
+| **INSUFFICIENT** | **0** | Drop or fold into related section |
+
+These are MINIMUMS. If the Analyst proposed 8+ subsections for a DEEP topic, allocate 5-6 pages.
+
+#### Budget priority rule
+
+When `max_pages` is tight, CUT from Introduction, Conclusion, and SHALLOW sections FIRST. NEVER cut a DEEP topic below 4 pages to make room for boilerplate sections.
+
 | Section type | Typical budget |
 |---|---|
-| Executive Summary | 1-2 pages |
-| Introduction | 1-2 pages |
-| Core technical section | 2-5 pages |
+| Executive Summary | 1 page (never more) |
+| Introduction | 1 page (keep minimal) |
+| Core technical section (DEEP) | 4-6 pages |
+| Core technical section (MEDIUM) | 2-3 pages |
 | Comparison/analysis section | 2-4 pages |
-| Conclusion | 1-2 pages |
+| Conclusion | 1 page (keep minimal) |
 
 Formula: `words = pages × 300`
 
-Verify: sum of all section pages = `max_pages` (±1).
+Verify: sum of all section pages = `max_pages` (±2 — prefer over-budget over shallow content).
+
+#### Anti-pattern: uniform distribution
+
+DO NOT split pages equally across sections. A document with 8 sections and 25 pages should NOT have each section get ~3 pages. DEEP topics with 11 proposed subsections and 4500 words of source material MUST get more than a SHALLOW topic with 1 extract.
 
 ## Output Format
 

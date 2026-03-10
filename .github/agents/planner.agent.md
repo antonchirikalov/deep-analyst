@@ -25,7 +25,11 @@ See these instruction files for complete requirements:
    - Merge overlapping sections from different subtopics
    - Combine SHALLOW sections with stronger neighbors
    - Skip INSUFFICIENT subtopics (log warning)
-4. **Allocate page budgets** per section (total must match `max_pages` from params)
+4. **Allocate page budgets** per section — driven by `Depth:` assessment in each `_structure.md`:
+   - DEEP topic → **minimum 4 pages** (5-6 if Analyst proposed 8+ subsections)
+   - MEDIUM topic → 2-3 pages
+   - SHALLOW topic → 1 page (merge with neighbor)
+   - If total exceeds `max_pages`, cut Introduction/Conclusion to 1 page each. **Never cut DEEP below 4 pages.**
 5. **Assign source files** — for each section, list the exact `research/{subtopic}/extract_N.md` paths
 6. **Write `toc.md`**
 
