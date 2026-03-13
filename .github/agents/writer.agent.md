@@ -26,9 +26,8 @@ See these instruction files for complete requirements:
 
 # Writing Guidelines
 
-- **Word count:** Match the page budget from ToC (pages × 300) as a MINIMUM, not a ceiling. For "подробный/detailed" format, sections should be 2000-3000 words each, NOT 500-800 words. **If your source extracts contain more technical detail than fits the budget, EXCEED the budget. Depth > budget.**
-- **Depth:** Explain mechanisms and internals, not just mention concepts. If the extract describes a JSON mailbox format — include the JSON structure. If it describes a directory layout — include the paths. If it lists 13 API operations — list and describe ALL 13, not 3. Technical depth = concrete details.
-- **Extract coverage:** You MUST include ≥80% of unique technical artifacts (JSON schemas, file trees, API lists, protocol specs, comparison tables) from your assigned source extracts. Dropping them to fit a word budget is FORBIDDEN.
+- **Word count:** Match the page budget from ToC (pages × 300 words, ±15%). For "подробный/detailed" format, this means sections of 2000-3000 words each, NOT 500-800 words.
+- **Depth:** Explain mechanisms and internals, not just mention concepts. If the extract describes a JSON mailbox format — include the JSON structure. If it describes a directory layout — include the paths. Technical depth = concrete details.
 - **Code from extracts:** If source extracts contain code blocks, JSON schemas, CLI commands, config formats — COPY THEM VERBATIM into your section. Don't strip technical artifacts from sources.
 - **Avoid filler:** Every sentence must add information. Don't write "X is a powerful tool" — write "X processes N tokens/sec using Y architecture". No marketing language.
 - **BANNED PHRASES:** "мощный", "инновационный", "revolutionary", "comprehensive", "cutting-edge", "seamless", "robust", "powerful solution", "game-changing". Replace with specific facts.

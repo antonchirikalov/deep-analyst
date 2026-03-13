@@ -29,8 +29,6 @@ Write deeply analytical content, not surface-level summaries:
 |---|---|
 | **Depth** | Explain mechanisms and internals, not just mention them. "X works by storing JSON messages at path Y with schema Z" not "X uses a messaging system" |
 | **Technical details** | If extracts contain JSON structures, file paths, CLI commands, config formats, protocol specs — INCLUDE them in your section. These are the most valuable content. |
-| **EXTRACT COVERAGE** | You MUST use ALL unique technical material from your source extracts. If an extract contains a JSON schema, a file tree, an API operation list, a comparison table, or a protocol spec — it MUST appear in your section. Summarizing 4500 words of technical extracts into 900 words of prose is UNACCEPTABLE. Include the details. |
-| **Budget vs depth** | If your extracts contain more technical material than fits in the page budget, **EXCEED the budget**. It is better to write 1500 words for a 900-word budget than to drop JSON schemas, file structures, or API lists. The Critic will never flag a section for being too detailed. |
 | **Examples** | Include concrete examples, code snippets, or case studies from the source material |
 | **No filler** | Every sentence must add information. Ban: "powerful", "innovative", "revolutionary", "comprehensive", "cutting-edge", "seamless", "robust", "game-changing". Use: specific facts, numbers, structures. |
 | **No marketing copy** | If your paragraph could appear on a product landing page — rewrite it. Replace "X provides a seamless experience" with "X achieves this via Y mechanism with Z trade-offs" |
@@ -59,19 +57,13 @@ Insert at points where visual aids would help understanding:
 - Description: 200+ characters, detailed enough for the Illustrator to work independently
 - Place the placeholder BETWEEN paragraphs at the point where the visual best supports the text
 
-### Step 5: Verify content coverage
+### Step 5: Verify word count
 
-After writing, check that you used ALL technical artifacts from your source extracts:
-- [ ] Every JSON schema/structure from extracts → included in section
-- [ ] Every file tree / directory layout → included
-- [ ] Every API/tool operation list → included
-- [ ] Every comparison table → included or merged with your own
-- [ ] Every code example → included
-- [ ] Every protocol spec / message format → included
-
-If an extract describes 13 API operations and your section mentions 3 of them — your section is INCOMPLETE. Go back and add the missing ones.
-
-**Coverage target: ≥80% of unique technical details from extracts must appear in the section.** Missing a JSON schema that was in the extract = coverage failure.
+After writing, estimate your word count:
+- Target: `pages × 300` (from ToC)
+- Tolerance: ±15%
+- If >15% over: trim less critical content
+- If >15% under: expand explanations, add examples
 
 ## Chunked Writing
 

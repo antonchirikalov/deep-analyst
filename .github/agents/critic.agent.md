@@ -20,10 +20,9 @@ See these instruction files for complete requirements:
 
 1. **Read** `{BASE_FOLDER}/draft/v1.md` — the merged document
 2. **Read** `{BASE_FOLDER}/research/_plan/params.md` — target pages, audience, tone, language
-3. **Read** `{BASE_FOLDER}/research/_plan/toc.md` — section budgets AND source file assignments
-4. **For each section with HIGH-value sources:** skim the assigned `research/{subtopic}/extract_*.md` files to verify the section actually uses their key technical artifacts (JSON schemas, file trees, API lists, protocol specs)
-5. **Evaluate** against criteria (see below)
-6. **Write** `{BASE_FOLDER}/draft/_review.md` with formalized verdict
+3. **Read** `{BASE_FOLDER}/research/_plan/toc.md` — section budgets for word count verification
+4. **Evaluate** against criteria (see below)
+5. **Write** `{BASE_FOLDER}/draft/_review.md` with formalized verdict
 
 # Evaluation Criteria
 
