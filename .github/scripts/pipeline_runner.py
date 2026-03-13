@@ -16,6 +16,8 @@ import sys
 import re
 import os
 import shutil
+import logging
+import traceback
 from pathlib import Path
 from datetime import datetime
 
@@ -53,18 +55,26 @@ def slugify(text: str) -> str:
 def count_urls(path: Path) -> int:
     if not path.exists():
         return 0
-    return len(re.findall(r'https?://', path.read_text(encoding='utf-8')))
+    return len(re.findall(r'https?://\S+', path.read_text(encoding='utf-8')))
 
 
-def extract_urls(path: Path) -> list:
+MAX_URLS_PER_SUBTOPIC = 5
+
+
+def extract_urls(path: Path, limit: int = MAX_URLS_PER_SUBTOPIC) -> list:
+    """Extract URLs from _links.md. Supports: 'N. URL', '- URL', inline URLs. Deduplicates."""
     if not path.exists():
         return []
+    seen = set()
     urls = []
     for line in path.read_text(encoding='utf-8').splitlines():
-        m = re.match(r'\s*\d+\.\s+(https?://\S+)', line)
-        if m:
-            url = m.group(1).split(' ')[0].rstrip(',').strip()
-            urls.append(url)
+        for m in re.finditer(r'(https?://\S+)', line):
+            url = m.group(1).rstrip('.,;)>').strip()
+            if url not in seen:
+                seen.add(url)
+                urls.append(url)
+                if len(urls) >= limit:
+                    return urls
     return urls
 
 
@@ -194,18 +204,109 @@ def save_retries(base: Path, retries: dict):
     (base / ".retries.json").write_text(json.dumps(retries))
 
 
-def can_retry(base: Path, key: str, max_retries: int = 1) -> bool:
+def can_retry(base: Path, key: str, max_retries: int = 1, reason: str = "") -> bool:
     retries = load_retries(base)
+    if "history" not in retries:
+        retries["history"] = []
     count = retries.get(key, 0)
     if count >= max_retries:
+        logging.warning("Retry limit reached for %s (%d/%d)", key, count, max_retries)
         return False
     retries[key] = count + 1
+    retries["history"].append({
+        "key": key, "attempt": count + 1,
+        "timestamp": datetime.now().isoformat(), "reason": reason,
+    })
     save_retries(base, retries)
+    logging.info("Retry %d/%d for %s: %s", count + 1, max_retries, key, reason)
     return True
+
+
+def setup_logging(base_folder: str = ""):
+    """Configure logging to stderr + file in base_folder."""
+    handlers = [logging.StreamHandler(sys.stderr)]
+    if base_folder:
+        log_path = Path(base_folder).resolve() / "pipeline.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        handlers=handlers,
+    )
 
 
 def revision_count(base: Path) -> int:
     return len(list(base.glob("draft/_review_v*.md")))
+
+
+def check_relevance(text: str, params: dict) -> float:
+    """Check if text is relevant to the research topic. Returns 0.0–1.0."""
+    topic = params.get('topic', '')
+    subtopics = params.get('subtopics', [])
+    keywords = set()
+    for source in [topic] + subtopics:
+        for word in re.findall(r'\b[a-zA-Z\u0400-\u04ff]{4,}\b', source):
+            keywords.add(word.lower())
+    if not keywords:
+        return 1.0
+    text_lower = text.lower()
+    found = sum(1 for kw in keywords if kw in text_lower)
+    return found / len(keywords)
+
+
+def record_phase_timing(base: Path, phase: int, phase_name: str):
+    """Record phase start time. Closes previous open phase."""
+    timing_file = base / ".timing.json"
+    timing = {}
+    if timing_file.exists():
+        timing = json.loads(timing_file.read_text())
+    now = datetime.now().isoformat()
+    phases = timing.get("phases", {})
+    for data in phases.values():
+        if "end" not in data:
+            data["end"] = now
+            start = datetime.fromisoformat(data["start"])
+            end = datetime.fromisoformat(now)
+            data["duration_s"] = int((end - start).total_seconds())
+    key = str(phase)
+    if key not in phases:
+        phases[key] = {"name": phase_name, "start": now}
+    timing["phases"] = phases
+    timing_file.write_text(json.dumps(timing, indent=2, ensure_ascii=False))
+
+
+def _with_log(result: dict, base_folder: str) -> dict:
+    """Add log_command to pipeline result for workflow-logger integration."""
+    phase = result.get("phase")
+    phase_name = result.get("phase_name", "")
+    action = result.get("action", "")
+    if phase is not None and action not in ("error", "warning", "agent_task"):
+        agent_map = {
+            "orchestrator_search": "Retriever",
+            "orchestrator_extract": "Extractor",
+            "launch_parallel": (result.get("agents") or [{}])[0].get("name", "Agent"),
+            "launch_single": result.get("agent", "Agent"),
+            "orchestrator_illustrate": "Illustrator",
+            "retry": "Writer",
+            "checkpoint": "Orchestrator",
+        }
+        agent = agent_map.get(action, "Orchestrator")
+        if action == "complete":
+            stats = result.get("stats", {})
+            result["log_command"] = (
+                f'python3 .github/skills/workflow-logger/scripts/workflow-logger.py complete '
+                f'--folder {base_folder} --words {stats.get("words", 0)} '
+                f'--pages {stats.get("pages_approx", 0)} '
+                f'--sections {stats.get("sections", 0)}'
+            )
+        else:
+            result["log_command"] = (
+                f'python3 .github/skills/workflow-logger/scripts/workflow-logger.py phase '
+                f'--folder {base_folder} --phase {phase} --agent {agent} '
+                f'--status start --detail "{phase_name}"'
+            )
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -394,7 +495,8 @@ def cmd_next(base_folder: str) -> dict:
                 "urls": count_urls(d / "_links.md"),
                 "output_file": str((d / "_links.md").relative_to(base)),
             })
-    if weak_links and can_retry(base, "phase_1_urls"):
+    if weak_links and can_retry(base, "phase_1_urls",
+            reason=f"{len(weak_links)} subtopics with <3 URLs"):
         return {
             "action": "orchestrator_search",
             "phase": 1, "phase_name": "Retrieval (retry)",
@@ -453,7 +555,8 @@ def cmd_next(base_folder: str) -> dict:
                 "avg_words": int(avg_wc), "issue": "Too shallow",
             })
 
-    if extract_issues and can_retry(base, "phase_2_quality"):
+    if extract_issues and can_retry(base, "phase_2_quality", max_retries=2,
+            reason="; ".join(f"{i['subtopic']}: {i['issue']}" for i in extract_issues)):
         extractions = []
         for issue in extract_issues:
             d = base / "research" / issue["subtopic"]
@@ -506,7 +609,7 @@ def cmd_next(base_folder: str) -> dict:
     # ── Validate Phase 4 ──
     toc_sections = parse_toc_sections(base)
     if not toc_sections:
-        if can_retry(base, "phase_4_parse"):
+        if can_retry(base, "phase_4_parse", reason="ToC unparseable"):
             (base / "research" / "_plan" / "toc.md").unlink()
             return {
                 "action": "launch_single",
@@ -555,7 +658,8 @@ def cmd_next(base_folder: str) -> dict:
                 "actual": word_count(f), "target": s["words"],
             })
 
-    if underweight and can_retry(base, "phase_5_wordcount"):
+    if underweight and can_retry(base, "phase_5_wordcount",
+            reason="; ".join(f"{u['section']}: {u['actual']}/{u['target']}w" for u in underweight)):
         agents = []
         for uw in underweight:
             s = next(x for x in toc_sections if x["num"] == uw["section"][:2])
@@ -575,6 +679,42 @@ def cmd_next(base_folder: str) -> dict:
             "issues": underweight, "agents": agents,
         }
 
+    # ── Validate Phase 5: Relevance ──
+    irrelevant = []
+    for s in toc_sections:
+        f = find_section_file(sections_dir, s["num"])
+        if f:
+            text = f.read_text(encoding='utf-8')
+            score = check_relevance(text, params)
+            if score < 0.15:
+                irrelevant.append({
+                    "section": f"{s['num']}. {s['title']}",
+                    "relevance": round(score, 2),
+                })
+                logging.warning("Low relevance %.2f in section %s", score, s["num"])
+
+    if irrelevant and can_retry(base, "phase_5_relevance",
+            reason="; ".join(f"{i['section']}: rel={i['relevance']}" for i in irrelevant)):
+        agents = []
+        for ir in irrelevant:
+            s = next(x for x in toc_sections if x["num"] == ir["section"][:2])
+            bad = find_section_file(sections_dir, s["num"])
+            if bad:
+                bad.unlink()
+            agents.append({
+                "name": "Writer",
+                "prompt": prompt_writer(base, s, is_revision=is_rev) +
+                    f"\nCRITICAL RETRY: Previous content was OFF-TOPIC (relevance={ir['relevance']}). "
+                    f"Write ONLY about {main_topic}. Use ONLY source extracts.",
+                "output_file": f"draft/_sections/{s['filename']}",
+                "description": f"Retry (off-topic) section {s['num']}",
+            })
+        return {
+            "action": "retry",
+            "phase": 5, "phase_name": "Writing (retry — off-topic)",
+            "issues": irrelevant, "agents": agents,
+        }
+
     # ═══════════ Phase 6: Editing — sub-agent returns text ═══════════
     if not (base / "draft" / "v1.md").exists():
         return {
@@ -589,7 +729,8 @@ def cmd_next(base_folder: str) -> dict:
     draft_wc = word_count(base / "draft" / "v1.md")
     target_words = max_pages * 300
 
-    if draft_wc < target_words * 0.4 and can_retry(base, "phase_6_wordcount"):
+    if draft_wc < target_words * 0.4 and can_retry(base, "phase_6_wordcount",
+            reason=f"Draft {draft_wc}w < 40% of target {target_words}w"):
         (base / "draft" / "v1.md").unlink()
         return {
             "action": "launch_single",
@@ -686,7 +827,8 @@ def cmd_next(base_folder: str) -> dict:
         }
 
     pngs = list((base / "illustrations").glob("*.png"))
-    if pngs and not has_png_refs and can_retry(base, "phase_8_embed"):
+    if pngs and not has_png_refs and can_retry(base, "phase_8_embed",
+            reason=f"{len(pngs)} PNGs exist but not embedded in draft"):
         manifest.unlink()
         return {
             "action": "orchestrator_illustrate",
@@ -826,15 +968,27 @@ def main():
 
     if command == "init":
         folder = sys.argv[2] if len(sys.argv) >= 3 else f"generated_docs_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        setup_logging(folder)
         result = cmd_init(folder)
     elif command in ("next", "status"):
         if len(sys.argv) < 3:
             print(json.dumps({"error": f"Usage: pipeline_runner.py {command} <base_folder>"}))
             sys.exit(1)
-        result = cmd_next(sys.argv[2]) if command == "next" else cmd_status(sys.argv[2])
+        setup_logging(sys.argv[2])
+        logging.info("cmd=%s folder=%s", command, sys.argv[2])
+        if command == "next":
+            result = cmd_next(sys.argv[2])
+            phase = result.get("phase")
+            if phase is not None:
+                record_phase_timing(Path(sys.argv[2]).resolve(), phase, result.get("phase_name", ""))
+            result = _with_log(result, sys.argv[2])
+        else:
+            result = cmd_status(sys.argv[2])
     else:
+        setup_logging()
         result = {"error": f"Unknown command: {command}"}
 
+    logging.info("Result: action=%s phase=%s", result.get("action"), result.get("phase"))
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -842,5 +996,11 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(json.dumps({"action": "error", "message": f"Script error: {e}"}, ensure_ascii=False))
+        tb = traceback.format_exc()
+        logging.error("Pipeline error: %s\n%s", e, tb)
+        print(json.dumps({
+            "action": "error",
+            "message": f"Script error: {e}",
+            "traceback": tb,
+        }, ensure_ascii=False))
         sys.exit(1)
