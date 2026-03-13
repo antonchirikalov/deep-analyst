@@ -30,8 +30,7 @@ Write deeply analytical content, not surface-level summaries:
 | **Depth** | Explain mechanisms and internals, not just mention them. "X works by storing JSON messages at path Y with schema Z" not "X uses a messaging system" |
 | **Technical details** | If extracts contain JSON structures, file paths, CLI commands, config formats, protocol specs — INCLUDE them in your section. These are the most valuable content. |
 | **Examples** | Include concrete examples, code snippets, or case studies from the source material |
-| **No filler** | Every sentence must add information. Ban: "powerful", "innovative", "revolutionary", "comprehensive", "cutting-edge", "seamless", "robust", "game-changing". Use: specific facts, numbers, structures. |
-| **No marketing copy** | If your paragraph could appear on a product landing page — rewrite it. Replace "X provides a seamless experience" with "X achieves this via Y mechanism with Z trade-offs" |
+| **No filler** | Every sentence must add information. Ban: "powerful", "innovative", "revolutionary", "comprehensive". Use: specific facts, numbers, structures. |
 | **Comparisons** | When comparing alternatives, use structured comparison (tables, pros/cons) |
 | **Formulas** | Follow params.md policy — typically minimal, always with intuitive explanation |
 | **References** | Integrate source material naturally, don't just list facts |

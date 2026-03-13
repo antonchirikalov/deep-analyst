@@ -29,7 +29,7 @@ curl -u "$CONFLUENCE_USER:$CONFLUENCE_TOKEN" ...
 - `CONFLUENCE_URL` — base URL, e.g. `https://confluence.scnsoft.com` (no trailing `/wiki` for Server/DC)
 - `CONFLUENCE_TOKEN` — Personal Access Token (base64 string)
 
-Note: MCP `mcp-atlassian` config uses different var names (`CONFLUENCE_PERSONAL_TOKEN`, `CONFLUENCE_USERNAME`). The publishing script uses `CONFLUENCE_URL` + `CONFLUENCE_TOKEN`.
+The publishing script uses `CONFLUENCE_URL` + `CONFLUENCE_TOKEN`.
 
 # Quick Start — Use the Publishing Script
 
@@ -161,13 +161,13 @@ print(f'Version: {data[\"version\"][\"number\"]}')
 If the user says "update existing":
 1. Search for the page:
    ```bash
-   curl -s -u "$CONFLUENCE_USER:$CONFLUENCE_TOKEN" \
+   curl -s -H "Authorization: Bearer $CONFLUENCE_TOKEN" \
      "$CONFLUENCE_URL/rest/api/content?title=$PAGE_TITLE&spaceKey=$SPACE_KEY&expand=version"
    ```
 2. Get current version number
 3. PUT with incremented version:
    ```bash
-   curl -s -u "$CONFLUENCE_USER:$CONFLUENCE_TOKEN" \
+   curl -s -H "Authorization: Bearer $CONFLUENCE_TOKEN" \
      -X PUT "$CONFLUENCE_URL/rest/api/content/$PAGE_ID" \
      -H "Content-Type: application/json" \
      -d '{
@@ -182,12 +182,12 @@ If the user says "update existing":
 
 | Variable | Required | Description |
 |---|---|---|
-| `CONFLUENCE_URL` | Yes | Base URL, e.g., `https://yourcompany.atlassian.net/wiki` |
-| `CONFLUENCE_USER` | Yes | Email for Atlassian account |
-| `CONFLUENCE_TOKEN` | Yes | API token from https://id.atlassian.com/manage-profile/security/api-tokens |
+| `CONFLUENCE_URL` | Yes | Base URL, e.g., `https://confluence.scnsoft.com` (no trailing `/wiki` for Server/DC) |
+| `CONFLUENCE_TOKEN` | Yes | Personal Access Token (PAT) — used with `Authorization: Bearer` header |
 
 # Rules
 
+- **NEVER use MCP Confluence tools (`mcp_mcp-atlassian_confluence_*`).** They cannot upload images. ALL operations go through REST API via `curl` or the Python publishing script.
 - **Never modify the original `.md` file**
 - **Always upload images BEFORE page content references them** (or use two-pass: create page, upload images, update page)
 - **Report: page URL, attachment count, any errors**

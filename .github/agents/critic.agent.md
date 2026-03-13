@@ -28,7 +28,7 @@ See these instruction files for complete requirements:
 
 | Criterion | What to check |
 |---|---|
-| **Technical depth** | Does each section explain HOW things work internally? Mechanisms, data flows, protocol details? Or just surface-level "X uses Y for Z"? **This is the #1 criterion.** |
+| **Technical depth** | Does each section explain HOW things work internally? Code examples, JSON structures, file paths, protocol details? Or just surface-level "X uses Y for Z"? **This is the #1 criterion.** |
 | **Content quality** | Depth, accuracy, examples, explanations |
 | **Factual density** | Substantive content vs. filler/fluff. Marketing language ("мощный", "инновационный", "comprehensive") = FILLER. |
 | **Word count** | Each section within ±15% of ToC budget. **For "подробный" format: if total document is <7000 words for 25-30 pages target, verdict MUST be REVISE.** |
@@ -36,7 +36,6 @@ See these instruction files for complete requirements:
 | **Style compliance** | Matches params.md audience, tone, language |
 | **Completeness** | All ToC sections present and adequately covered |
 | **No duplication** | Same content shouldn't appear in multiple sections |
-| **No ASCII diagrams** | Document MUST NOT contain box-drawing characters (┌─┐│└┘├┤═║). Any ASCII art diagrams → REVISE with HIGH severity. These must be replaced with `<!-- ILLUSTRATION: ... -->` placeholders or removed entirely. |
 
 # What to IGNORE
 

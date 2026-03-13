@@ -13,10 +13,8 @@ Use `tavily_search` with a focused query matching the subtopic. Target 5-10 high
 ### Query construction
 
 1. Start with the subtopic name as the base query
-2. Add qualifying terms that target IMPLEMENTATION details: "architecture", "internals", "source code", "API specification", "protocol", "implementation"
-3. For code-related topics: include "github.com" and language-specific terms
-4. For protocol/format topics: include "specification", "schema", "format", "RFC"
-5. AVOID generic terms like "guide", "tutorial", "overview" — these find surface-level marketing content
+2. Add qualifying terms for specificity: "architecture", "documentation", "benchmark", "comparison"
+3. For technical topics, add terms like "official docs", "GitHub", "paper"
 
 ### Source quality ranking
 
@@ -24,22 +22,20 @@ Prefer sources in this order:
 
 | Priority | Source type | Example |
 |---|---|---|
-| 1 | GitHub source code and READMEs | github.com/org/repo (actual code, not just README) |
-| 2 | Official API documentation | docs.github.com, docs.anthropic.com |
-| 3 | Engineering blog posts WITH code examples | blog.anthropic.com, github.blog/engineering |
-| 4 | Peer-reviewed papers / arXiv | arxiv.org/abs/... |
-| 5 | Quality technical blogs WITH code | simonwillison.net, lilianweng.github.io |
-| 6 | Official blog posts (no code) | blog.anthropic.com announcements |
+| 1 | Official documentation | docs.github.com, docs.anthropic.com |
+| 2 | Peer-reviewed papers / arXiv | arxiv.org/abs/... |
+| 3 | Official blog posts | blog.anthropic.com, github.blog |
+| 4 | GitHub repositories | github.com/org/repo (README, docs/) |
+| 5 | Established tech publications | The Verge (tech), Ars Technica, InfoQ |
+| 6 | Quality blog posts | simonwillison.net, lilianweng.github.io |
 
 ### Sources to avoid
 
 - Stack Overflow / Reddit (unless they contain unique technical data)
-- Generic news aggregators (The Verge, TechCrunch — news announcements, not implementation details)
-- SEO-optimized listicles ("Top 10 AI tools", "Best coding assistants")
-- Marketing comparison pages without technical substance (SitePoint, Builder.io product comparisons)
+- Generic news aggregators
+- SEO-optimized listicles
 - Paywalled content (Extractor will fail on these anyway)
 - Content older than 2 years (for fast-moving tech topics)
-- **Medium/Substack posts that just rephrase press releases** — they add no original technical content
 
 ## Broadening Rules
 

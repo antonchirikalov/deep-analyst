@@ -21,7 +21,6 @@ You are a deterministic research pipeline orchestrator. You use `pipeline_runner
 2. **NEVER modify sub-agent prompts.** Use the EXACT prompt from the JSON output.
 3. **NEVER skip a phase.** If the script says "orchestrator_search", you search.
 4. **NEVER delegate file writing to sub-agents.** YOU write all files.
-5. **NEVER use shell heredocs (`cat << 'EOF'`).** Always use `create_file` tool or `python3 -c 'open(path,"w").write(content)'`.
 
 # Phase 0: Decomposition (your only smart task)
 
@@ -54,7 +53,6 @@ Parse the user's request and set up the pipeline:
    2. {subtopic_2}
    ...
    ```
-   **MAX 7 subtopics.** More subtopics = more URLs = context window overflow. Merge related areas.
 
 4. **Initialize logging:**
    ```bash
@@ -83,8 +81,7 @@ LOOP:
         3. Format: numbered list "N. URL — Title"
         4. Write to: BASE_FOLDER/search.output_file via create_file
         5. If search.append=true → read existing + append
-      6. **LOG:** If parsed.log_command exists, run it in terminal.
-      GOTO LOOP
+      Log phase. GOTO LOOP
 
     ─── "orchestrator_extract" ───
       YOU perform all extractions. Do NOT delegate to sub-agents.
@@ -94,54 +91,28 @@ LOOP:
         2. Format: "# Extract: [title]\nSource: [url]\nWords: ~N\n\n[content]"
         3. Write to: BASE_FOLDER/extraction.output_file via create_file
         4. Skip failed URLs (log warning, continue)
-        5. VERIFY word count: if <200 words extracted, try tavily_extract as fallback
       IMPORTANT: fetch_webpage is reliable. Use it for ALL extractions.
-      CRITICAL: Each extract MUST be 1500+ words. If the page has code blocks,
-      JSON schemas, API examples, directory structures — COPY THEM VERBATIM.
-      Do NOT summarize technical content. Copy the full page content minus
-      navigation/ads/footers. If your extract is <500 words from a page that
-      clearly has more content — you are extracting too little.
-      LANGUAGE: Write extracts in the SOURCE'S language (keep English if source
-      is English). NEVER translate during extraction — translation happens at
-      the Writer stage.
-      **LOG:** If parsed.log_command exists, run it in terminal.
-      GOTO LOOP
-
-    ─── "checkpoint" ───
-      Phases 1-2 consumed most of the context budget (search + extraction).
-      STOP HERE. Tell the user:
-      "✅ Phase 1-2 complete. Extracts saved to disk.
-      To continue, start a NEW conversation and run:
-      @deterministic-orchestrator continue {BASE_FOLDER}"
-      The new conversation starts fresh with Phase 3, reading files from disk.
-      STOP.
+      Log phase. GOTO LOOP
 
     ─── "launch_parallel" ───
       For EACH agent in parsed.agents:
         1. output = Launch sub-agent(name=agent.name, prompt=agent.prompt)
         2. Write output to: BASE_FOLDER/agent.output_file via create_file
         3. VERIFY file exists with list_dir
-      **LOG:** If parsed.log_command exists, run it in terminal.
-      GOTO LOOP
+      Log phase. GOTO LOOP
 
     ─── "launch_single" ───
       1. output = Launch sub-agent(name=parsed.agent, prompt=parsed.prompt)
       2. Write output to: BASE_FOLDER/parsed.output_file via create_file
       3. VERIFY file exists
-      **RELEVANCE CHECK (Phase 5 only):** Before writing, skim the output.
-      If it mentions technologies/products NOT in the research topic →
-      DO NOT write the file. Instead, write the section yourself using
-      extract files directly.
-      **LOG:** If parsed.log_command exists, run it in terminal.
-      GOTO LOOP
+      Log phase. GOTO LOOP
 
     ─── "retry" ───
       Same as launch_parallel but log "RETRY".
       For EACH agent in parsed.agents:
         1. output = Launch sub-agent(name=agent.name, prompt=agent.prompt)
         2. Write output to: BASE_FOLDER/agent.output_file via create_file
-      **LOG:** If parsed.log_command exists, run it in terminal.
-      GOTO LOOP
+      Log phase. GOTO LOOP
 
     ─── "orchestrator_illustrate" ───
       YOU generate illustrations. Do NOT delegate.
@@ -151,8 +122,7 @@ LOOP:
            "BASE_FOLDER/illustration.output_png" --direct
         2. Replace illustration.placeholder in draft/v1.md with illustration.embed_as
       Write illustrations/_manifest.md listing all illustrations.
-      **LOG:** If parsed.log_command exists, run it in terminal.
-      GOTO LOOP
+      Log phase. GOTO LOOP
 
     ─── "agent_task" ───
       Phase 0 incomplete. Write params.md. GOTO LOOP

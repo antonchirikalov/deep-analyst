@@ -43,7 +43,6 @@ The merged document will likely exceed 3000 words. Use chunked writing:
 - **Transitions:** Add 1-2 sentence transitions between major sections for reading flow
 - **Executive Summary:** Write a concise summary (200-400 words) at the beginning covering key findings
 - **Illustration placeholders:** PRESERVE all `<!-- ILLUSTRATION: ... -->` comments exactly as written by Writers — do NOT remove, modify, or treat them as errors
-- **Remove ASCII diagrams:** If any section contains box-drawing characters (┌─┐│└┘├┤═║), REMOVE the entire ASCII art block. Replace it with an `<!-- ILLUSTRATION: ... -->` placeholder describing what the diagram showed, or convert to a bullet list.
 - **Consistent formatting:** Ensure heading levels are consistent (H1 for title, H2 for sections, H3 for subsections)
 - **Word count compliance:** Target `max_pages × 300` words (±10%). Trim if over, flag if significantly under.
 

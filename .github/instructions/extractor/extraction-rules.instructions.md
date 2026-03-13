@@ -44,8 +44,7 @@ python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
 
 After extracting raw content:
 
-1. **Write in the SOURCE LANGUAGE** — if the source is English, write extract in English. NEVER translate. Translation happens at Writer stage.
-2. **Structure with Markdown headings** — add H2/H3 headers for navigation, preserving the source's logical sections
+1. **Structure with Markdown headings** — add H2/H3 headers for navigation, preserving the source's logical sections
 2. **COPY code examples verbatim** — preserve in fenced code blocks with language tags. NEVER omit code.
 3. **COPY data tables verbatim** — preserve in Markdown table format
 4. **Remove ONLY boilerplate** — navigation menus, footers, ads, cookie banners, sidebars
