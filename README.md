@@ -1,36 +1,29 @@
 # Deep Analyst
 
-Multi-agent platform for GitHub Copilot that produces publication-quality analytical documents and architecture proposals. Three orchestrators, 15 specialized agents, two Python state machines, and the PaperBanana illustration system.
+Multi-agent platform for GitHub Copilot with **two independent pipelines**: deep web research and architecture analysis. Both produce publication-quality documents with illustrations, peer review, and optional PDF/Confluence export.
+
+Built on GitHub Copilot agent mode with 15 specialized agents, 2 Python state machines, and the PaperBanana illustration system.
 
 ![Platform Overview](docs/images/platform_overview.png)
 
 ---
 
-## Three Orchestrators
+## Two Pipelines
 
-Deep Analyst provides three entry points — each is a fully automated pipeline producing a polished document from a single user prompt.
+Deep Analyst provides two entry points — each launches a fully automated pipeline driven by a Python state machine. The orchestrator agent is a "dumb scheduler": it reads the next action from the script and executes it.
 
-| | **Research Orchestrator** | **Deterministic Orchestrator** | **Architecture Orchestrator** |
-|---|---|---|---|
-| **Entry point** | `@research-orchestrator` | `@deterministic-orchestrator` | `@architecture-orchestrator` |
-| **Scheduling** | Convention-based (agent decides) | Python state machine (`pipeline_runner.py`) | Python state machine (`arch_pipeline_runner.py`) |
-| **Input** | Research question / topic | Research question / topic | Code, docs, configs, Confluence, web |
-| **Output** | Analytical document (5–30 pages) | Analytical document (5–30 pages) | Architecture proposal with options & trade-offs |
-| **Folder prefix** | `generated_docs_*` | `generated_docs_*` | `generated_arch_*` |
-| **Phases** | 0–8 | 0–8 | 0–9 |
-
-### Two scheduling models
-
-The Research and Deterministic orchestrators produce **the same output** using the same sub-agents, but differ in how they schedule work:
-
-- **Convention over Orchestration** (`@research-orchestrator`): The orchestrator agent is "smart" — it reads instruction files, decides next phase, constructs sub-agent prompts, and validates outputs. No Python script involved.
-- **Deterministic Pipeline** (`@deterministic-orchestrator`): The Python script is the brain — it returns JSON with the next action, agent name, exact prompt, and output path. The orchestrator agent is a "dumb executor" that never makes decisions.
-
-The deterministic approach is more reliable for complex documents — the state machine handles retries, validation thresholds, and phase transitions predictably.
+| | **Research Pipeline** | **Architecture Pipeline** |
+|---|---|---|
+| **Entry point** | `@research-orchestrator` | `@architecture-orchestrator` |
+| **State machine** | `pipeline_runner.py` | `arch_pipeline_runner.py` |
+| **Input** | Research question / topic | Code, docs, configs, Confluence, web |
+| **Output** | Analytical document (15–100 pages) | Architecture proposal with options & trade-offs |
+| **Folder prefix** | `generated_docs_*` | `generated_arch_*` |
+| **Phases** | 0–8 (Decompose → Research → Analyze → Plan → Write → Edit → Review → Illustrate → Deliver) | 0–9 (Decompose → Source Analysis → Assess → Propose → Plan → Write → Edit → Review → Illustrate → Deliver) |
 
 ### Shared components
 
-All three pipelines share these agents and infrastructure:
+Both pipelines share these agents and infrastructure:
 - **Planner** — builds Table of Contents with page budgets
 - **Writer** (Opus) — writes one section at a time from source material
 - **Editor** (Opus) — merges sections, deduplicates, adds transitions
@@ -41,9 +34,9 @@ All three pipelines share these agents and infrastructure:
 
 ---
 
-## Orchestrator 1: Research (Convention-based)
+## Pipeline 1: Research
 
-The **Research Orchestrator** takes a topic, searches the web, extracts full content from sources, and produces a structured analytical document. The agent itself manages phase transitions by following instruction files.
+The **Research Pipeline** takes a topic, searches the web, extracts full content from sources, and produces a structured analytical document.
 
 ![Research Pipeline](docs/images/research_pipeline.png)
 
@@ -54,6 +47,8 @@ The **Research Orchestrator** takes a topic, searches the web, extracts full con
 Compare GitHub Copilot Agents, Claude Code, and OpenAI Codex CLI.
 Type: comparative analysis, Language: Russian, Size: detailed
 ```
+
+The Orchestrator parses the query, applies defaults for missing parameters, and launches the pipeline. **It never asks for clarification.**
 
 ### Phases
 
@@ -69,67 +64,30 @@ Type: comparative analysis, Language: Russian, Size: detailed
 | 7 | Illustrator | Generate PNGs via PaperBanana, embed in draft | `illustrations/*.png` |
 | 8 | — | Delivery: stats, paths, next steps | — |
 
----
+### Parameters
 
-## Orchestrator 2: Deterministic (Python state machine)
+All parameters are **optional** — sensible defaults are applied.
 
-The **Deterministic Orchestrator** runs the same research pipeline but with `pipeline_runner.py` controlling every decision. The agent calls `pipeline_runner.py next` in a loop and executes whatever JSON action it returns.
+| Parameter | Values | Default |
+|-----------|--------|---------|
+| **Size** | `brief` (15–20p), `standard` (30–40p), `detailed` (60–100p) | `standard` |
+| **Language** | Any | Auto-detected from query |
+| **Document type** | `comparison`, `overview`, `sota`, `report` | Auto-detected |
+| **Illustration mode** | `direct` (default), `pipeline`, `none` | `direct` |
 
-### How to use
+### Research agents
 
-```
-@deterministic-orchestrator
-LLM inference optimization: KV-cache, speculative decoding, quantization.
-Size: detailed, Language: Russian
-```
-
-### Execution loop
-
-```
-LOOP:
-  result = pipeline_runner.py next {BASE_FOLDER}   → JSON action
-  
-  switch action.type:
-    "orchestrator_search"   → orchestrator does web search directly
-    "orchestrator_extract"  → orchestrator fetches URLs directly
-    "launch_parallel"       → ALL runSubagent calls in ONE batch (concurrent)
-    "launch_single"         → one sub-agent, wait for result, write to output_file
-    "orchestrator_illustrate" → orchestrator runs PaperBanana directly
-    "complete"              → done
-```
-
-### Key differences from Research Orchestrator
-
-| Aspect | Research Orchestrator | Deterministic Orchestrator |
-|--------|----------------------|---------------------------|
-| Phase transitions | Agent reads instructions | `pipeline_runner.py next` returns JSON |
-| Sub-agent prompts | Agent constructs from templates | Script generates exact prompt text |
-| Validation | Agent checks files manually | Script checks word counts, file counts, thresholds |
-| Retries | Agent decides when to retry | Script returns retry actions automatically |
-| Search/extraction | Sub-agents (Researcher) | Orchestrator does it directly (Phases 1–2) |
-| Phases 3–7 | Same | Same (sub-agents return text → orchestrator writes) |
-
-### Phases
-
-Same 0–8 phases as the Research Orchestrator, but Phases 1–2 are handled differently:
-
-| Phase | Handler | Action |
-|-------|---------|--------|
-| 0 | Orchestrator | Parse query → `params.md` |
-| 1 | **Orchestrator (direct)** | Search cascade: Tavily → GitHub → HuggingFace → own knowledge |
-| 2 | **Orchestrator (direct)** | Extract full content from discovered URLs via `fetch_webpage` |
-| 3 | Analyst ×N (parallel) | Per-subtopic structure analysis |
-| 4 | Planner | Build unified ToC |
-| 5 | Writer ×M (parallel) | Write sections |
-| 6 | Editor | Merge into `v1.md` |
-| 7 | Critic | Review loop (max 2 iterations) |
-| 8 | Illustrator / direct | Generate PNGs |
+| Agent | Model | Role |
+|-------|-------|------|
+| **Research Orchestrator** | Sonnet | Entry point, dumb scheduler |
+| **Researcher** | Sonnet | URL discovery + full content extraction per subtopic |
+| **Analyst** | Sonnet | Per-subtopic structure analysis |
 
 ---
 
-## Orchestrator 3: Architecture
+## Pipeline 2: Architecture
 
-The **Architecture Orchestrator** analyzes existing code, documentation, and infrastructure to produce architecture proposals with trade-offs, risk assessment, and migration paths. Driven by `arch_pipeline_runner.py`.
+The **Architecture Pipeline** analyzes existing code, documentation, and infrastructure to produce architecture proposals with trade-offs, risk assessment, and migration paths.
 
 ![Architecture Pipeline](docs/images/architecture_pipeline.png)
 
@@ -140,6 +98,8 @@ The **Architecture Orchestrator** analyzes existing code, documentation, and inf
 Redesign the LLM Orchestrator service. Improve modularity and testability.
 Target: /path/to/repo, Size: standard, Language: Russian
 ```
+
+The Orchestrator parses the request, identifies sources (code, docs, configs, web, Confluence), and launches the pipeline.
 
 ### Sources
 
@@ -182,31 +142,10 @@ The pipeline supports 5 source types in `params.md`:
 
 | Agent | Model | Role |
 |-------|-------|------|
+| **Architecture Orchestrator** | Sonnet | Entry point, handles web/Confluence I/O |
 | **Source Analyzer** | Sonnet | Scans code, docs, configs → structured extracts |
 | **Arch Assessor** | Sonnet | Per-area architecture assessment (patterns, debt, risks) |
 | **Solution Architect** | Opus | Synthesizes assessments → 2–3 proposals with recommendation |
-
----
-
-## All Agents
-
-| Agent | Model | Used by | Role |
-|-------|-------|---------|------|
-| **Research Orchestrator** | Sonnet | — | Convention-based research pipeline scheduler |
-| **Deterministic Orchestrator** | Sonnet | — | Python-driven research pipeline executor |
-| **Architecture Orchestrator** | Sonnet | — | Python-driven architecture pipeline executor |
-| **Researcher** | Sonnet | Research | URL discovery + full content extraction per subtopic |
-| **Analyst** | Sonnet | Research, Deterministic | Per-subtopic structure analysis |
-| **Source Analyzer** | Sonnet | Architecture | Code/docs/config scanning → structured extracts |
-| **Arch Assessor** | Sonnet | Architecture | Per-area architecture assessment |
-| **Solution Architect** | Opus | Architecture | 2–3 architecture proposals with recommendation |
-| **Planner** | Opus | All | Unified Table of Contents with page budgets |
-| **Writer** | Opus | All | Per-section content writing |
-| **Editor** | Opus | All | Section merge, dedup, transitions |
-| **Critic** | Sonnet | All | Structured review → APPROVED / REVISE |
-| **Illustrator** | Sonnet | All | PaperBanana PNG generation |
-| **PDF Exporter** | — | Standalone | Markdown → PDF |
-| **Confluence Publisher** | — | Standalone | Publish to Confluence with images |
 
 ---
 
@@ -216,11 +155,9 @@ The pipeline supports 5 source types in `params.md`:
 
 **Folders = Routing.** Each subtopic (research) or source area (architecture) gets its own folder under `research/`.
 
-**Two scheduling models.** Convention-based (agent decides) or deterministic (Python script decides). Same sub-agents, same output format.
+**Orchestrator = Dumb Scheduler.** The Python state machine (`pipeline_runner.py` / `arch_pipeline_runner.py`) decides the next phase. The orchestrator agent just executes.
 
 **Sub-agents return text (by design, not limitation).** Sub-agents CAN write files and use MCP tools, but the pipeline uses a centralized I/O pattern: most sub-agents return markdown text, and the orchestrator writes it to disk. This gives the orchestrator control over verification and logging. Exception: Researcher agents write their own files directly.
-
-**Parallel execution.** VS Code spawns multiple `runSubagent` calls concurrently when they appear in a single tool-call batch. Phases 1, 2, 4 exploit this — each parallel agent writes to its own folder/file.
 
 **Deterministic phases.** Each phase has validation gates. The state machine checks word counts, file existence, and structural integrity before advancing.
 
@@ -228,16 +165,14 @@ The pipeline supports 5 source types in `params.md`:
 
 ## PaperBanana Illustration System
 
-All pipelines use **PaperBanana** (`llmsresearch/paperbanana`) to generate publication-quality PNG diagrams — no Mermaid, no ASCII art, no screenshots.
+Both pipelines use **PaperBanana** to generate publication-quality PNG diagrams — no Mermaid, no ASCII art, no screenshots.
 
 | Mode | When to use | Command |
 |------|-------------|---------|
-| `--direct` | Architecture diagrams, flowcharts, comparisons | `paperbanana_generate.py "prompt" "output.png" --direct` |
-| `--context` | Data visualizations, methodology figures | `paperbanana_generate.py "desc" "output.png" --context "text"` |
+| `--direct` | Architecture diagrams, flowcharts, comparisons | `paperbanana_generate.py "prompt" "output.png" --direct --type architecture` |
+| `--context` | Data visualizations, methodology figures | `paperbanana_generate.py "desc" "output.png" --context "text" --type methodology` |
 
-**Models:** `gpt-image-1.5` (image generation), `gpt-5.2` (VLM planning/critique).
-
-**Visual style:** NeurIPS academic aesthetic — flat vector, 2D, white background, pastel palette, clean typography.
+**Visual style:** NeurIPS 2025 academic aesthetic — flat vector, 2D, white background, pastel palette, clean typography.
 
 **Placeholder format** (written by Writer, processed by Illustrator):
 ```markdown
@@ -264,89 +199,46 @@ Confluence Publisher uses **REST API** for image uploads (MCP cannot upload imag
 
 ---
 
-## Parameters
-
-All parameters are **optional** — sensible defaults are applied.
-
-| Parameter | Values | Default |
-|-----------|--------|---------|
-| **Size** | `brief` (5–8p), `standard` (15–20p), `detailed` (25–30p) | `standard` (20 pages) |
-| **Language** | Any | Auto-detected from query |
-| **Document type** | `comparison`, `overview`, `sota`, `report` | Auto-detected |
-| **Illustration mode** | `direct` (default), `pipeline`, `none` | `direct` |
-| **Audience** | `technical`, `executive`, `general` | Inferred from context |
-| **Tone** | `academic`, `business`, `conversational` | Inferred from context |
-
-Page conversion: 1 page ≈ 300 words (Markdown with headings, code blocks, illustrations).
-
----
-
 ## Project Structure
 
 ```
 .github/
-  agents/                        # 15 agent definitions
-    research-orchestrator.agent.md    # Convention-based research pipeline
-    deterministic-orchestrator.agent.md  # Python-driven research pipeline
-    architecture-orchestrator.agent.md   # Python-driven architecture pipeline
-    researcher.agent.md           # URL discovery + content extraction
-    analyst.agent.md              # Structure analysis
-    source-analyzer.agent.md      # Code/docs/config scanning
-    arch-assessor.agent.md        # Architecture assessment
-    solution-architect.agent.md   # Proposal generation
-    planner.agent.md              # ToC builder
-    writer.agent.md               # Section writer
-    editor.agent.md               # Document merger
-    critic.agent.md               # Peer review
-    illustrator.agent.md          # PNG generation
-    pdf-exporter.agent.md         # PDF conversion
-    confluence-publisher.agent.md  # Confluence publishing
-  instructions/                   # Per-agent instruction files (12 files)
-    shared/                       # Cross-agent conventions
-    research-orchestrator/        # Workflow phases, topic decomposition
-    researcher/                   # Research protocol, search strategy
-    analyst/                      # Structure analysis rules
-    planner/                      # ToC generation rules
-    writer/                       # Section writing protocol
-    editor/                       # Merge rules
-    critic/                       # Verdict format
-    illustrator/                  # Generation pipeline, style guidelines
-    pdf-exporter/                 # Export pipeline
+  agents/                       # 15 agent definitions
+    research-orchestrator.agent.md   # Pipeline 1 entry point
+    architecture-orchestrator.agent.md  # Pipeline 2 entry point
+    researcher.agent.md          # URL discovery + content extraction
+    analyst.agent.md             # Structure analysis
+    source-analyzer.agent.md     # Code/docs/config scanning
+    arch-assessor.agent.md       # Architecture assessment
+    solution-architect.agent.md  # Proposal generation
+    planner.agent.md             # ToC builder
+    writer.agent.md              # Section writer
+    editor.agent.md              # Document merger
+    critic.agent.md              # Peer review
+    illustrator.agent.md         # PNG generation
+    pdf-exporter.agent.md        # PDF conversion
+    confluence-publisher.agent.md # Confluence publishing
+    deterministic-orchestrator.agent.md  # Legacy orchestrator
+  instructions/                  # Per-agent instruction files
   scripts/
-    pipeline_runner.py            # Research pipeline state machine
-    arch_pipeline_runner.py       # Architecture pipeline state machine
-    extract_url.py                # URL extraction utility
-    merge_sections.py             # Section merge utility
-    validate_agents.py            # Agent file validator
-    test_pipeline.py              # Pipeline tests
+    pipeline_runner.py           # Research pipeline state machine
+    arch_pipeline_runner.py      # Architecture pipeline state machine
+    validate_agents.py           # Agent file validator
   skills/
-    image-generator/              # PaperBanana wrapper (paperbanana_generate.py)
-    workflow-logger/              # Phase logging (workflow-logger.py, agent-trace.py)
-    pdf-exporter/                 # PDF conversion scripts
-docs/
-  architecture-decisions.md       # 26 ADRs
-  images/                         # README illustrations
-scripts/
-  publish_to_confluence.py        # Standalone Confluence publisher
-generated_docs_*/                 # Research pipeline output folders
-generated_arch_*/                 # Architecture pipeline output folders
+    image-generator/             # PaperBanana wrapper scripts
+    workflow-logger/             # Phase logging utilities
+generated_docs_*/                # Research pipeline output folders
+generated_arch_*/                # Architecture pipeline output folders
 ```
 
 ---
 
 ## Quick Start
 
-### Research document (convention-based)
+### Research document
 ```
 @research-orchestrator
 What is WebAssembly and how does it work? Size: standard
-```
-
-### Research document (deterministic)
-```
-@deterministic-orchestrator
-LLM inference optimization: KV-cache, speculative decoding, quantization.
-Size: detailed, Language: Russian
 ```
 
 ### Architecture proposal
@@ -417,7 +309,47 @@ Deep Analyst agents live inside `.github/agents/`. VS Code Copilot discovers age
 
 Open your project, then `File → Add Folder to Workspace…` → select the cloned `deep-analyst` folder. Save the workspace (`File → Save Workspace As…`). Now all 15 agents are available in Copilot Chat alongside your project files.
 
-**Option B — Symlink `.github` into your project:**
+**Option B — Git submodule (recommended for teams):**
+
+```bash
+# From your project root:
+git submodule add https://github.com/antonchirikalov/deep-analyst.git .deep-analyst
+git commit -m "Add deep-analyst as submodule"
+```
+
+Then create (or update) a `.code-workspace` file at your project root:
+
+```jsonc
+// my-project.code-workspace
+{
+  "folders": [
+    { "path": "." },
+    { "path": ".deep-analyst" }
+  ]
+}
+```
+
+Open the workspace file in VS Code (`File → Open Workspace from File…`) — all 15 agents become available in Copilot Chat alongside your project code.
+
+**For teammates cloning the repo:**
+
+```bash
+git clone --recurse-submodules https://github.com/your-org/your-project.git
+# Or if already cloned without submodules:
+git submodule update --init
+```
+
+**To update deep-analyst to latest version:**
+
+```bash
+cd .deep-analyst && git pull origin main && cd ..
+git add .deep-analyst
+git commit -m "Update deep-analyst"
+```
+
+> **Tip:** Add `generated_docs_*` and `generated_arch_*` to your project's `.gitignore` — pipeline output folders should not be committed.
+
+**Option C — Symlink `.github` into your project:**
 
 ```bash
 # From your project root:
@@ -427,7 +359,7 @@ ln -s /path/to/deep-analyst/.github/scripts .github/scripts
 ln -s /path/to/deep-analyst/.github/skills .github/skills
 ```
 
-> **Note:** Option A is cleaner — no symlinks to maintain, easy to update with `git pull`.
+> **Note:** Option A is simplest for solo use, Option B is best for teams (version-locked, reproducible). Option C works but symlinks are fragile across machines.
 
 ### 3. Configure environment
 
