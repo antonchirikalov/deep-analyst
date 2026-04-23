@@ -130,11 +130,13 @@ def validate_cross_refs(agents_dict):
     return errors
 
 def validate_phase_numbers(agents_dict):
+    # Phase numbers for agents that have --phase in trace calls.
+    # Shared agents (Planner, Writer, Editor, Critic, Illustrator) use
+    # architecture pipeline phase numbers. Analyst is research-only (Phase 2).
+    # Researcher has no trace calls (no --phase).
     expected = {
         "Research Orchestrator": "0",
-        "Retriever": "1",
-        "Extractor": "2",
-        "Analyst": "3",
+        "Analyst": "2",
         "Planner": "4",
         "Writer": "5",
         "Editor": "6",

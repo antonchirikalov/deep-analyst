@@ -11,26 +11,9 @@ description: Generates publication-quality academic illustrations using the Pape
 
 ## CRITICAL: Choosing the right mode
 
-### Direct generation (RECOMMENDED for architecture/technical diagrams)
+### Full PaperBanana pipeline (DEFAULT — all illustration types)
 ```bash
-python3 .github/skills/image-generator/scripts/paperbanana_generate.py "[description]" "illustrations/diagram_N.png" --direct
-```
-
-**Use `--direct` for:** architecture diagrams, system overviews, flowcharts, comparison layouts, any diagram with boxes/arrows/structural elements.
-
-`--direct` calls gpt-image-1.5 with a concise prompt. This produces clean graphical illustrations.
-
-**Prompt guidelines for `--direct`:**
-- Keep prompts SHORT (2-4 sentences max)
-- Focus on visual structure, not exact text labels
-- Describe shapes, colors, spatial layout
-- Say "professional vector-style technical diagram" or "clean infographic style"
-- Do NOT list exact text for every label — the model will generate appropriate labels
-- Do NOT write multi-paragraph layout specs — this causes ASCII-art output
-
-### Full PaperBanana pipeline (for data visualizations / methodology figures only)
-```bash
-python3 .github/skills/image-generator/scripts/paperbanana_generate.py "[illustration description]" "illustrations/diagram_N.png" --context "[methodology text or section content]"
+python3 .github/skills/image-generator/scripts/paperbanana_generate.py "[description]" "illustrations/diagram_N.png" --context "[section text, 200-500 words]" --critic-rounds 2
 ```
 
 The wrapper calls the real `paperbanana` package (`PaperBananaPipeline.generate()`) with OpenAI provider:
@@ -39,7 +22,21 @@ The wrapper calls the real `paperbanana` package (`PaperBananaPipeline.generate(
 
 VLM agent (Planner/Stylist/Critic) uses `gpt-5.2`, image generation (Visualizer) uses `gpt-image-1.5`.
 
-⚠️ **WARNING:** The pipeline Planner generates extremely verbose layout descriptions. For architecture/technical diagrams, this causes the Visualizer to produce text-heavy ASCII-art-like output instead of clean graphics. Use `--direct` mode for these.
+**Pipeline takes 3–5 min per illustration (5–7 API calls).** Always use `run_in_terminal` with `timeout: 0` (no timeout limit).
+
+### Direct generation (via `--direct` flag)
+```bash
+python3 .github/skills/image-generator/scripts/paperbanana_generate.py "[description]" "illustrations/diagram_N.png" --direct
+```
+
+**Use `--direct` when:** explicitly requested via flag or prompt. Single API call, ~40 sec.
+
+**Prompt guidelines for `--direct`:**
+- Keep prompts SHORT (2-4 sentences max)
+- Focus on visual structure, not exact text labels
+- Describe shapes, colors, spatial layout
+- Do NOT list exact text for every label
+- Do NOT write multi-paragraph layout specs — this causes ASCII-art output
 
 ## Configuration
 

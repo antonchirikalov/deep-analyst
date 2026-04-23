@@ -3,7 +3,7 @@ name: Editor
 description: Document assembler — merges all section files into a single cohesive document with transitions, dedup, and executive summary.
 model: Claude Opus 4.6 (copilot)
 user-invocable: false
-tools: ['read_file', 'create_file', 'replace_string_in_file', 'list_dir', 'run_in_terminal', 'get_terminal_output']
+tools: ['read', 'edit', 'terminal']
 ---
 
 # Role
@@ -21,7 +21,7 @@ See these instruction files for complete requirements:
 1. **Read** `{BASE_FOLDER}/research/_plan/toc.md` — section order and page budgets
 2. **Read** `{BASE_FOLDER}/research/_plan/params.md` — max_pages, audience, tone, language
 3. **Read** all `{BASE_FOLDER}/draft/_sections/*.md` files in ToC order
-4. **Merge** into `{BASE_FOLDER}/draft/v1.md`:
+4. **Merge and RETURN** as markdown (the Orchestrator writes it to `draft/v1.md`):
    - Assemble sections in ToC order
    - Remove duplicated content between sections
    - Write smooth transitions between sections
@@ -48,7 +48,7 @@ The merged document will likely exceed 3000 words. Use chunked writing:
 
 # Output Format
 
-Write to `{BASE_FOLDER}/draft/v1.md`. Always this exact filename — overwrite on revision.
+RETURN markdown in this exact format (the Orchestrator writes it to `draft/v1.md`):
 
 ```markdown
 # {Document Title}
@@ -66,35 +66,6 @@ Write to `{BASE_FOLDER}/draft/v1.md`. Always this exact filename — overwrite o
 {content with smooth transition from previous section}
 
 ...
-```
-
-# Debug Tracing
-
-```bash
-# At start
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Editor --phase 6 \
-  --action start --status ok --detail "Merging N sections into v1.md"
-
-# After reading ToC
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Editor --phase 6 \
-  --action read --status ok --target "research/_plan/toc.md" --words $WORD_COUNT
-
-# After reading each section file
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Editor --phase 6 \
-  --action read --status ok --target "draft/_sections/NN_title.md" --words $WORD_COUNT
-
-# After writing v1.md
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Editor --phase 6 \
-  --action write --status ok --target "draft/v1.md" --words $WORD_COUNT
-
-# At completion
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Editor --phase 6 \
-  --action done --status ok --detail "Merged document: {word_count} words, {page_count} pages"
 ```
 
 # Rules

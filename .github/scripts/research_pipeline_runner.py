@@ -2,13 +2,13 @@
 """
 Deterministic Pipeline Runner v2 for deep-analyst research pipeline.
 
-Architecture: Orchestrator handles ALL I/O (search, extract, file writes).
-Sub-agents only RETURN text — orchestrator writes it to disk.
+Architecture: Sub-agents RETURN text — orchestrator writes it to disk.
+Exception: Researcher writes files directly (writes_own_files: True).
 
 Usage:
-    python3 .github/scripts/pipeline_runner.py init [base_folder]
-    python3 .github/scripts/pipeline_runner.py next <base_folder>
-    python3 .github/scripts/pipeline_runner.py status <base_folder>
+    python3 .github/scripts/research_pipeline_runner.py init [base_folder]
+    python3 .github/scripts/research_pipeline_runner.py next <base_folder>
+    python3 .github/scripts/research_pipeline_runner.py status <base_folder>
 """
 
 import json
@@ -16,10 +16,72 @@ import sys
 import re
 import os
 import shutil
-import logging
-import traceback
+import subprocess
 from pathlib import Path
 from datetime import datetime
+
+# ═══════════════════════════════════════════════════════════════
+# VENV BOOTSTRAP — auto-activate .venv when run outside of it
+# ═══════════════════════════════════════════════════════════════
+
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _SCRIPT_DIR.parent.parent  # .github/scripts → project root
+_VENV_DIR = _PROJECT_ROOT / ".venv"
+_VENV_PYTHON = _VENV_DIR / (Path("Scripts") / "python.exe" if os.name == "nt" else Path("bin") / "python3")
+_REQUIREMENTS = ["loguru"]
+
+
+def _bootstrap_venv():
+    """Re-exec under .venv/bin/python3 if running with system Python.
+    Creates the venv and installs dependencies if it doesn't exist."""
+    if sys.prefix != sys.base_prefix:
+        return  # already in a venv
+    if not _VENV_DIR.exists():
+        print(f"[bootstrap] Creating {_VENV_DIR} ...", file=sys.stderr)
+        subprocess.check_call([sys.executable, "-m", "venv", str(_VENV_DIR)])
+        subprocess.check_call(
+            [str(_VENV_PYTHON), "-m", "pip", "install", "-q"] + _REQUIREMENTS
+        )
+    elif not _VENV_PYTHON.exists():
+        print(f"[bootstrap] ERROR: {_VENV_PYTHON} not found", file=sys.stderr)
+        sys.exit(1)
+    print(f"[bootstrap] Re-launching with {_VENV_PYTHON}", file=sys.stderr)
+    os.execv(str(_VENV_PYTHON), [str(_VENV_PYTHON)] + sys.argv)
+
+
+_bootstrap_venv()
+
+from loguru import logger
+
+# ═══════════════════════════════════════════════════════════════
+# LOGGING  (loguru: stderr=INFO, file=DEBUG with rotation)
+# ═══════════════════════════════════════════════════════════════
+
+# Remove default sink, add stderr with INFO
+logger.remove()
+logger.add(
+    sys.stderr,
+    level="INFO",
+    format="<level>[{level.name[0]}]</level> <cyan>{function}</cyan>: {message}",
+    colorize=True,
+)
+
+_file_sinks: dict[str, int] = {}  # path → sink_id, prevents duplicates
+
+
+def _setup_file_log(base: Path):
+    """Add file sink to log DEBUG-level trace into BASE_FOLDER/pipeline.log."""
+    log_file = str(base / "pipeline.log")
+    if log_file not in _file_sinks:
+        sid = logger.add(
+            log_file,
+            level="DEBUG",
+            format="{time:HH:mm:ss.SSS} [{level.name:<7}] {function}:{line} | {message}",
+            rotation="5 MB",
+            retention=3,
+            encoding="utf-8",
+        )
+        _file_sinks[log_file] = sid
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -55,27 +117,7 @@ def slugify(text: str) -> str:
 def count_urls(path: Path) -> int:
     if not path.exists():
         return 0
-    return len(re.findall(r'https?://\S+', path.read_text(encoding='utf-8')))
-
-
-MAX_URLS_PER_SUBTOPIC = 5
-
-
-def extract_urls(path: Path, limit: int = MAX_URLS_PER_SUBTOPIC) -> list:
-    """Extract URLs from _links.md. Supports: 'N. URL', '- URL', inline URLs. Deduplicates."""
-    if not path.exists():
-        return []
-    seen = set()
-    urls = []
-    for line in path.read_text(encoding='utf-8').splitlines():
-        for m in re.finditer(r'(https?://\S+)', line):
-            url = m.group(1).rstrip('.,;)>').strip()
-            if url not in seen:
-                seen.add(url)
-                urls.append(url)
-                if len(urls) >= limit:
-                    return urls
-    return urls
+    return len(re.findall(r'https?://', path.read_text(encoding='utf-8')))
 
 
 def word_count(path: Path) -> int:
@@ -177,11 +219,48 @@ def parse_verdict(base: Path) -> str:
     if not review.exists():
         return "NONE"
     text = review.read_text(encoding='utf-8')
+    # Try structured JSON verdict first (new format)
+    json_m = re.search(r'```json\s*\n\s*(\{.*?"verdict".*?\})\s*\n\s*```', text, re.DOTALL)
+    if json_m:
+        try:
+            verdict_data = json.loads(json_m.group(1))
+            v = verdict_data.get("verdict", "").upper()
+            if v in ("APPROVED", "REVISE"):
+                return v
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    # Fallback: regex on markdown headers (legacy format)
     if re.search(r'Verdict.*APPROVED', text, re.IGNORECASE):
         return "APPROVED"
     if re.search(r'Verdict.*REVISE', text, re.IGNORECASE):
         return "REVISE"
     return "UNKNOWN"
+
+
+def parse_verdict_details(base: Path) -> dict:
+    """Parse the structured verdict JSON block from review. Returns dict with verdict, issues, section_targets."""
+    review = base / "draft" / "_review.md"
+    if not review.exists():
+        return {"verdict": "NONE", "issues": [], "section_targets": []}
+    text = review.read_text(encoding='utf-8')
+    json_m = re.search(r'```json\s*\n\s*(\{.*?"verdict".*?\})\s*\n\s*```', text, re.DOTALL)
+    if json_m:
+        try:
+            data = json.loads(json_m.group(1))
+            return {
+                "verdict": data.get("verdict", "UNKNOWN").upper(),
+                "issues": data.get("issues", []),
+                "section_targets": data.get("section_targets", []),
+            }
+        except (json.JSONDecodeError, AttributeError):
+            pass
+    # Fallback
+    verdict = "UNKNOWN"
+    if re.search(r'Verdict.*APPROVED', text, re.IGNORECASE):
+        verdict = "APPROVED"
+    elif re.search(r'Verdict.*REVISE', text, re.IGNORECASE):
+        verdict = "REVISE"
+    return {"verdict": verdict, "issues": [], "section_targets": []}
 
 
 def find_section_file(sections_dir: Path, num: str):
@@ -204,115 +283,80 @@ def save_retries(base: Path, retries: dict):
     (base / ".retries.json").write_text(json.dumps(retries))
 
 
-def can_retry(base: Path, key: str, max_retries: int = 1, reason: str = "") -> bool:
+def can_retry(base: Path, key: str, max_retries: int = 1) -> bool:
     retries = load_retries(base)
-    if "history" not in retries:
-        retries["history"] = []
     count = retries.get(key, 0)
     if count >= max_retries:
-        logging.warning("Retry limit reached for %s (%d/%d)", key, count, max_retries)
         return False
     retries[key] = count + 1
-    retries["history"].append({
-        "key": key, "attempt": count + 1,
-        "timestamp": datetime.now().isoformat(), "reason": reason,
-    })
     save_retries(base, retries)
-    logging.info("Retry %d/%d for %s: %s", count + 1, max_retries, key, reason)
     return True
-
-
-def setup_logging(base_folder: str = ""):
-    """Configure logging to stderr + file in base_folder."""
-    handlers = [logging.StreamHandler(sys.stderr)]
-    if base_folder:
-        log_path = Path(base_folder).resolve() / "pipeline.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        handlers.append(logging.FileHandler(log_path, encoding="utf-8"))
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=handlers,
-    )
 
 
 def revision_count(base: Path) -> int:
     return len(list(base.glob("draft/_review_v*.md")))
 
 
-def check_relevance(text: str, params: dict) -> float:
-    """Check if text is relevant to the research topic. Returns 0.0–1.0."""
-    topic = params.get('topic', '')
-    subtopics = params.get('subtopics', [])
-    keywords = set()
-    for source in [topic] + subtopics:
-        for word in re.findall(r'\b[a-zA-Z\u0400-\u04ff]{4,}\b', source):
-            keywords.add(word.lower())
-    if not keywords:
-        return 1.0
-    text_lower = text.lower()
-    found = sum(1 for kw in keywords if kw in text_lower)
-    return found / len(keywords)
-
-
-def record_phase_timing(base: Path, phase: int, phase_name: str):
-    """Record phase start time. Closes previous open phase."""
-    timing_file = base / ".timing.json"
-    timing = {}
-    if timing_file.exists():
-        timing = json.loads(timing_file.read_text())
-    now = datetime.now().isoformat()
-    phases = timing.get("phases", {})
-    for data in phases.values():
-        if "end" not in data:
-            data["end"] = now
-            start = datetime.fromisoformat(data["start"])
-            end = datetime.fromisoformat(now)
-            data["duration_s"] = int((end - start).total_seconds())
-    key = str(phase)
-    if key not in phases:
-        phases[key] = {"name": phase_name, "start": now}
-    timing["phases"] = phases
-    timing_file.write_text(json.dumps(timing, indent=2, ensure_ascii=False))
-
-
-def _with_log(result: dict, base_folder: str) -> dict:
-    """Add log_command to pipeline result for workflow-logger integration."""
-    phase = result.get("phase")
-    phase_name = result.get("phase_name", "")
-    action = result.get("action", "")
-    if phase is not None and action not in ("error", "warning", "agent_task"):
-        agent_map = {
-            "orchestrator_search": "Retriever",
-            "orchestrator_extract": "Extractor",
-            "launch_parallel": (result.get("agents") or [{}])[0].get("name", "Agent"),
-            "launch_single": result.get("agent", "Agent"),
-            "orchestrator_illustrate": "Illustrator",
-            "retry": "Writer",
-            "checkpoint": "Orchestrator",
-        }
-        agent = agent_map.get(action, "Orchestrator")
-        if action == "complete":
-            stats = result.get("stats", {})
-            result["log_command"] = (
-                f'python3 .github/skills/workflow-logger/scripts/workflow-logger.py complete '
-                f'--folder {base_folder} --words {stats.get("words", 0)} '
-                f'--pages {stats.get("pages_approx", 0)} '
-                f'--sections {stats.get("sections", 0)}'
-            )
-        else:
-            result["log_command"] = (
-                f'python3 .github/skills/workflow-logger/scripts/workflow-logger.py phase '
-                f'--folder {base_folder} --phase {phase} --agent {agent} '
-                f'--status start --detail "{phase_name}"'
-            )
-    return result
-
-
 # ═══════════════════════════════════════════════════════════════
 # PROMPT BUILDERS — sub-agents READ files, RETURN text
 # Orchestrator writes the returned text to output_file
+# (Researcher is special: it writes files DIRECTLY)
 # ═══════════════════════════════════════════════════════════════
+
+def prompt_researcher(base: Path, subtopic_slug: str, main_topic: str,
+                      extract_only: bool = False) -> str:
+    name = subtopic_slug.replace('_', ' ')
+    folder = f'{base}/research/{subtopic_slug}'
+    links_file = f'{folder}/_links.md'
+
+    if extract_only:
+        return (
+            f'You are a Researcher. Extract content from sources for subtopic "{name}".\n'
+            f'Overall topic: "{main_topic}"\n\n'
+            f'STEP 1: Load tools — call tool_search_tool_regex with pattern '
+            f'"tavily|fetch_webpage|mcp_github|mcp_huggingface|mcp_mcp-atlassian"\n\n'
+            f'STEP 2: Read sources from {links_file}\n\n'
+            f'STEP 3: For EACH source, extract full content:\n'
+            f'  - Web URLs: try tavily_extract → fallback fetch_webpage\n'
+            f'  - GitHub files: use mcp_github_get_file_contents(owner, repo, path)\n'
+            f'  - Confluence: use mcp_mcp-atlassian_confluence_get_page(page_id)\n'
+            f'  - Write to {folder}/extract_N.md with header:\n'
+            f'     # Extract: [title]\\nSource: [url]\\nWords: ~N\\n\\n[FULL content]\n'
+            f'  - Do NOT summarize — copy VERBATIM. Include all code blocks, JSON, CLI.\n'
+            f'  - Skip failed sources, continue to next.\n\n'
+            f'RETURN a brief summary: how many sources processed, total words extracted.'
+        )
+
+    return (
+        f'You are a Researcher. Perform deep search and extraction for subtopic "{name}".\n'
+        f'Overall topic: "{main_topic}"\n\n'
+        f'STEP 1: Load tools — call tool_search_tool_regex with pattern '
+        f'"tavily|fetch_webpage|mcp_github|mcp_huggingface|mcp_mcp-atlassian"\n\n'
+        f'STEP 2: Search for sources using MULTIPLE channels:\n'
+        f'  a. Web: mcp_tavily-remote_tavily_search('
+        f'query="{name} technical deep dive documentation", max_results=10)\n'
+        f'     If fails: try "{name} guide tutorial overview"\n'
+        f'  b. GitHub (for OSS/code topics): mcp_github_search_repositories(query="{name}")\n'
+        f'     Then read key files: README.md, docs/, architecture files\n'
+        f'  c. HuggingFace (for ML/AI topics): mcp_huggingface_paper_search(query="{name}")\n'
+        f'     Also try: mcp_huggingface_hf_doc_search(query="{name}")\n'
+        f'  d. Confluence (for internal topics): mcp_mcp-atlassian_confluence_search(query="{name}")\n'
+        f'     Then read pages: mcp_mcp-atlassian_confluence_get_page(page_id)\n'
+        f'  e. If all fail: use your knowledge to list known documentation URLs\n'
+        f'  f. Write numbered list to {links_file}:\n'
+        f'     1. URL — Title\\n     2. URL — Title\\n     ...\n\n'
+        f'STEP 3: Extract content from EACH source\n'
+        f'  - Web URLs: try tavily_extract → fallback fetch_webpage\n'
+        f'  - GitHub files: use mcp_github_get_file_contents(owner, repo, path)\n'
+        f'  - Confluence pages: use mcp_mcp-atlassian_confluence_get_page(page_id)\n'
+        f'  - Write to {folder}/extract_N.md with header:\n'
+        f'     # Extract: [title]\\nSource: [url]\\nWords: ~N\\n\\n[FULL content]\n'
+        f'  - Do NOT summarize — copy VERBATIM. Include ALL code blocks, JSON, CLI.\n'
+        f'  - Skip failed sources, continue to next.\n\n'
+        f'TARGET: 5+ sources extracted, 800+ words average per extract.\n'
+        f'Use GitHub for source code topics, HuggingFace for ML topics, Tavily for everything else.\n\n'
+        f'RETURN a brief summary: sources found, extracts written, total words.'
+    )
 
 def prompt_analyst(base: Path, subtopic_slug: str, main_topic: str) -> str:
     return (
@@ -375,6 +419,7 @@ def prompt_writer(base: Path, section: dict, is_revision: bool = False) -> str:
         f'   <!-- ILLUSTRATION: type="architecture|comparison|pipeline", '
         f'section="{section["num"]}. {section["title"]}", '
         f'description="Detailed description of visualization" -->\n'
+        f'   Follow EVERY placeholder with a caption: *Рис. N. Short caption*\n'
         f'4. NO FILLER: Ban "мощный", "инновационный", "comprehensive", "революционный".\n'
         f'5. LANGUAGE: Write in the language from params.md.\n\n'
         f'RETURN the section as markdown starting with ## heading. No preamble.'
@@ -428,6 +473,8 @@ def cmd_init(base_folder: str) -> dict:
     (base / "research" / "_plan").mkdir(parents=True, exist_ok=True)
     (base / "draft" / "_sections").mkdir(parents=True, exist_ok=True)
     (base / "illustrations").mkdir(parents=True, exist_ok=True)
+    _setup_file_log(base)
+    logger.info("INIT folder={}", base)
     return {
         "status": "ready",
         "folder": str(base),
@@ -440,10 +487,15 @@ def cmd_next(base_folder: str) -> dict:
     if not base.exists():
         return {"action": "error", "message": f"Folder {base} does not exist."}
 
+    _setup_file_log(base)
     params = parse_params(base)
+    retries = load_retries(base)
+    if retries:
+        logger.debug("Retry state: {}", retries)
 
     # ── Phase 0 ──
     if not params or not params.get('subtopics'):
+        logger.info("Phase 0: params not found or no subtopics")
         return {
             "action": "agent_task", "phase": 0,
             "phase_name": "Decomposition",
@@ -453,6 +505,8 @@ def cmd_next(base_folder: str) -> dict:
     main_topic = params.get('topic', 'Research')
     max_pages = params.get('max_pages', 25)
     subtopics = params['subtopics']
+    logger.info("Params: topic={!r}, max_pages={}, subtopics={}",
+                main_topic, max_pages, len(subtopics))
 
     for st in subtopics:
         slug = slugify(st)
@@ -460,90 +514,38 @@ def cmd_next(base_folder: str) -> dict:
 
     subtopic_dirs = get_subtopic_dirs(base)
 
-    # ═══════════ Phase 1: Retrieval — ORCHESTRATOR searches ═══════════
-    missing_links = [d for d in subtopic_dirs if not (d / "_links.md").exists()]
-    if missing_links:
-        searches = []
-        for d in missing_links:
+    # ═══════════ Phase 1: Research — Researcher sub-agents (parallel) ═══════════
+    # Each Researcher searches + extracts for one subtopic, writes files directly
+    needs_research = [d for d in subtopic_dirs if not list(d.glob("extract_*.md"))]
+    if needs_research:
+        logger.info("Phase 1: {} subtopics need research: {}",
+                    len(needs_research), [d.name for d in needs_research])
+        agents = []
+        for d in needs_research:
+            has_links = (d / "_links.md").exists()
             name = d.name.replace('_', ' ')
-            searches.append({
-                "query": f"{name} technical deep dive documentation",
-                "query_alt": f"{name} guide tutorial overview",
-                "subtopic": d.name,
-                "output_file": str((d / "_links.md").relative_to(base)),
+            agents.append({
+                "name": "Researcher",
+                "prompt": prompt_researcher(base, d.name, main_topic, extract_only=has_links),
+                "writes_own_files": True,
+                "verify_dir": str(d.relative_to(base)),
+                "description": f"Research {name}",
             })
         return {
-            "action": "orchestrator_search",
-            "phase": 1, "phase_name": "Retrieval",
-            "count": len(searches),
-            "searches": searches,
-            "instructions": (
-                "For EACH search: call tavily_search(query, max_results=10). "
-                "Format results as numbered list: 'N. URL — Title'. "
-                "Write to output_file in BASE_FOLDER. "
-                "If tavily fails, try query_alt. "
-                "If both fail, use fetch_webpage on known documentation URLs."
-            ),
+            "action": "launch_parallel",
+            "phase": 1, "phase_name": "Research",
+            "agent_count": len(agents), "agents": agents,
         }
 
-    # ── Validate Phase 1 ──
-    weak_links = []
-    for d in subtopic_dirs:
-        if count_urls(d / "_links.md") < 3:
-            weak_links.append({
-                "subtopic": d.name,
-                "urls": count_urls(d / "_links.md"),
-                "output_file": str((d / "_links.md").relative_to(base)),
-            })
-    if weak_links and can_retry(base, "phase_1_urls",
-            reason=f"{len(weak_links)} subtopics with <3 URLs"):
-        return {
-            "action": "orchestrator_search",
-            "phase": 1, "phase_name": "Retrieval (retry)",
-            "count": len(weak_links),
-            "searches": [{
-                "query": f"{w['subtopic'].replace('_', ' ')} detailed technical guide",
-                "query_alt": f"{w['subtopic'].replace('_', ' ')} documentation tutorial",
-                "subtopic": w["subtopic"],
-                "output_file": w["output_file"],
-                "append": True,
-            } for w in weak_links],
-            "instructions": "RETRY: Too few URLs. Broaden queries. Append to existing file.",
-        }
-
-    # ═══════════ Phase 2: Extraction — ORCHESTRATOR extracts ═══════════
-    missing_extracts = [d for d in subtopic_dirs if not list(d.glob("extract_*.md"))]
-    if missing_extracts:
-        extractions = []
-        for d in missing_extracts:
-            urls = extract_urls(d / "_links.md")
-            for i, url in enumerate(urls, 1):
-                extractions.append({
-                    "url": url,
-                    "subtopic": d.name,
-                    "index": i,
-                    "output_file": str((d / f"extract_{i}.md").relative_to(base)),
-                })
-        return {
-            "action": "orchestrator_extract",
-            "phase": 2, "phase_name": "Extraction",
-            "count": len(extractions),
-            "extractions": extractions,
-            "instructions": (
-                "For EACH URL: call tavily_extract(urls=[url]) or fetch_webpage(url). "
-                "Write FULL content to output_file with header:\n"
-                "# Extract: [title]\nSource: [url]\nWords: ~N\n\n[content]\n"
-                "Do NOT summarize. Copy verbatim. Skip failed URLs."
-            ),
-        }
-
-    # ── Validate Phase 2 ──
+    # ── Validate Phase 1: research quality ──
     extract_issues = []
     for d in subtopic_dirs:
         exts = list(d.glob("extract_*.md"))
         urls = count_urls(d / "_links.md")
         n_ext = len(exts)
         avg_wc = sum(word_count(e) for e in exts) / max(n_ext, 1)
+        logger.debug("Phase 1 validate: {} — extracts={}, urls={}, avg_wc={}",
+                     d.name, n_ext, urls, int(avg_wc))
         if n_ext < max(int(urls * 0.4), 2) and n_ext < 3:
             extract_issues.append({
                 "subtopic": d.name, "extracts": n_ext, "urls": urls,
@@ -555,32 +557,34 @@ def cmd_next(base_folder: str) -> dict:
                 "avg_words": int(avg_wc), "issue": "Too shallow",
             })
 
-    if extract_issues and can_retry(base, "phase_2_quality", max_retries=2,
-            reason="; ".join(f"{i['subtopic']}: {i['issue']}" for i in extract_issues)):
-        extractions = []
+    if extract_issues and can_retry(base, "phase_1_quality"):
+        logger.warning("Phase 1 RETRY: {} issues: {}",
+                       len(extract_issues),
+                       [(i['subtopic'], i['issue'], f"exts={i['extracts']}", f"avg={i['avg_words']}w") for i in extract_issues])
+        agents = []
         for issue in extract_issues:
             d = base / "research" / issue["subtopic"]
-            urls = extract_urls(d / "_links.md")
-            existing = len(list(d.glob("extract_*.md")))
-            for i, url in enumerate(urls[existing:], existing + 1):
-                extractions.append({
-                    "url": url, "subtopic": issue["subtopic"],
-                    "index": i,
-                    "output_file": str((d / f"extract_{i}.md").relative_to(base)),
-                })
-        if extractions:
-            return {
-                "action": "orchestrator_extract",
-                "phase": 2, "phase_name": "Extraction (retry)",
-                "count": len(extractions),
-                "extractions": extractions,
-                "issues": extract_issues,
-                "instructions": "RETRY: Extract remaining URLs. Copy verbatim.",
-            }
+            agents.append({
+                "name": "Researcher",
+                "prompt": prompt_researcher(base, issue["subtopic"], main_topic,
+                                            extract_only=True) +
+                    f'\nRETRY: Previous had {issue["extracts"]} extracts, '
+                    f'avg {issue["avg_words"]} words. Extract MORE URLs with MORE depth.',
+                "writes_own_files": True,
+                "verify_dir": str(d.relative_to(base)),
+                "description": f"Retry research {issue['subtopic']}",
+            })
+        return {
+            "action": "retry",
+            "phase": 1, "phase_name": "Research (retry)",
+            "issues": extract_issues, "agents": agents,
+        }
 
-    # ═══════════ Phase 3: Analysis — sub-agent returns text ═══════════
+    # ═══════════ Phase 2: Analysis — sub-agent returns text ═══════════
     missing_structures = [d for d in subtopic_dirs if not (d / "_structure.md").exists()]
     if missing_structures:
+        logger.info("Phase 2: {} subtopics need analysis: {}",
+                    len(missing_structures), [d.name for d in missing_structures])
         agents = []
         for d in missing_structures:
             agents.append({
@@ -591,29 +595,31 @@ def cmd_next(base_folder: str) -> dict:
             })
         return {
             "action": "launch_parallel",
-            "phase": 3, "phase_name": "Analysis",
+            "phase": 2, "phase_name": "Analysis",
             "agent_count": len(agents), "agents": agents,
         }
 
-    # ═══════════ Phase 4: Planning — sub-agent returns text ═══════════
+    # ═══════════ Phase 3: Planning — sub-agent returns text ═══════════
     if not (base / "research" / "_plan" / "toc.md").exists():
+        logger.info("Phase 3: ToC not found, launching Planner")
         return {
             "action": "launch_single",
-            "phase": 4, "phase_name": "Planning",
+            "phase": 3, "phase_name": "Planning",
             "agent": "Planner",
             "prompt": prompt_planner(base),
             "output_file": "research/_plan/toc.md",
             "description": "Build unified ToC",
         }
 
-    # ── Validate Phase 4 ──
+    # ── Validate Phase 3 ──
     toc_sections = parse_toc_sections(base)
     if not toc_sections:
-        if can_retry(base, "phase_4_parse", reason="ToC unparseable"):
+        logger.warning("Phase 3 VALIDATE: ToC unparseable")
+        if can_retry(base, "phase_3_parse"):
             (base / "research" / "_plan" / "toc.md").unlink()
             return {
                 "action": "launch_single",
-                "phase": 4, "phase_name": "Planning (retry)",
+                "phase": 3, "phase_name": "Planning (retry)",
                 "agent": "Planner",
                 "prompt": prompt_planner(base) + (
                     "\nRETRY: Previous ToC unparseable. "
@@ -624,7 +630,11 @@ def cmd_next(base_folder: str) -> dict:
             }
         return {"action": "error", "message": "ToC unparseable."}
 
-    # ═══════════ Phase 5: Writing — sub-agents return text ═══════════
+    logger.info("Phase 3 OK: sections={}, total_pages={}, breakdown={}",
+                len(toc_sections), sum(s['pages'] for s in toc_sections),
+                [(s['num'], s['title'], f"{s['pages']}p") for s in toc_sections])
+
+    # ═══════════ Phase 4: Writing — sub-agents return text ═══════════
     sections_dir = base / "draft" / "_sections"
     missing_sections = []
     for s in toc_sections:
@@ -634,6 +644,10 @@ def cmd_next(base_folder: str) -> dict:
     is_rev = revision_count(base) > 0
 
     if missing_sections:
+        logger.info("Phase 4: {} sections to write{}: {}",
+                    len(missing_sections),
+                    " (revision)" if is_rev else "",
+                    ", ".join(f"{s['num']}.{s['title']}({s['words']}w)" for s in missing_sections))
         agents = []
         for s in missing_sections:
             agents.append({
@@ -644,11 +658,11 @@ def cmd_next(base_folder: str) -> dict:
             })
         return {
             "action": "launch_parallel",
-            "phase": 5, "phase_name": "Writing" + (" (revision)" if is_rev else ""),
+            "phase": 4, "phase_name": "Writing" + (" (revision)" if is_rev else ""),
             "agent_count": len(agents), "agents": agents,
         }
 
-    # ── Validate Phase 5 ──
+    # ── Validate Phase 4 ──
     underweight = []
     for s in toc_sections:
         f = find_section_file(sections_dir, s["num"])
@@ -658,8 +672,10 @@ def cmd_next(base_folder: str) -> dict:
                 "actual": word_count(f), "target": s["words"],
             })
 
-    if underweight and can_retry(base, "phase_5_wordcount",
-            reason="; ".join(f"{u['section']}: {u['actual']}/{u['target']}w" for u in underweight)):
+    if underweight:
+        logger.warning("Phase 4 UNDERWEIGHT: {}",
+                       "; ".join(f"{u['section']} actual={u['actual']}w target={u['target']}w ({u['actual']*100//max(u['target'],1)}%)" for u in underweight))
+    if underweight and can_retry(base, "phase_4_wordcount"):
         agents = []
         for uw in underweight:
             s = next(x for x in toc_sections if x["num"] == uw["section"][:2])
@@ -675,51 +691,18 @@ def cmd_next(base_folder: str) -> dict:
             })
         return {
             "action": "retry",
-            "phase": 5, "phase_name": "Writing (retry)",
+            "phase": 4, "phase_name": "Writing (retry)",
             "issues": underweight, "agents": agents,
         }
 
-    # ── Validate Phase 5: Relevance ──
-    irrelevant = []
-    for s in toc_sections:
-        f = find_section_file(sections_dir, s["num"])
-        if f:
-            text = f.read_text(encoding='utf-8')
-            score = check_relevance(text, params)
-            if score < 0.15:
-                irrelevant.append({
-                    "section": f"{s['num']}. {s['title']}",
-                    "relevance": round(score, 2),
-                })
-                logging.warning("Low relevance %.2f in section %s", score, s["num"])
-
-    if irrelevant and can_retry(base, "phase_5_relevance",
-            reason="; ".join(f"{i['section']}: rel={i['relevance']}" for i in irrelevant)):
-        agents = []
-        for ir in irrelevant:
-            s = next(x for x in toc_sections if x["num"] == ir["section"][:2])
-            bad = find_section_file(sections_dir, s["num"])
-            if bad:
-                bad.unlink()
-            agents.append({
-                "name": "Writer",
-                "prompt": prompt_writer(base, s, is_revision=is_rev) +
-                    f"\nCRITICAL RETRY: Previous content was OFF-TOPIC (relevance={ir['relevance']}). "
-                    f"Write ONLY about {main_topic}. Use ONLY source extracts.",
-                "output_file": f"draft/_sections/{s['filename']}",
-                "description": f"Retry (off-topic) section {s['num']}",
-            })
-        return {
-            "action": "retry",
-            "phase": 5, "phase_name": "Writing (retry — off-topic)",
-            "issues": irrelevant, "agents": agents,
-        }
-
-    # ═══════════ Phase 6: Editing — sub-agent returns text ═══════════
+    # ═══════════ Phase 5: Editing — sub-agent returns text ═══════════
     if not (base / "draft" / "v1.md").exists():
+        n_files = len(list(sections_dir.glob('*.md')))
+        total_sec_wc = sum(word_count(f) for f in sections_dir.glob('*.md'))
+        logger.info("Phase 5: Launching Editor — {} section files, total {}w", n_files, total_sec_wc)
         return {
             "action": "launch_single",
-            "phase": 6, "phase_name": "Editing",
+            "phase": 5, "phase_name": "Editing",
             "agent": "Editor",
             "prompt": prompt_editor(base),
             "output_file": "draft/v1.md",
@@ -728,25 +711,28 @@ def cmd_next(base_folder: str) -> dict:
 
     draft_wc = word_count(base / "draft" / "v1.md")
     target_words = max_pages * 300
+    logger.info("Phase 5 validate: v1.md {}w, target {}w ({}%)",
+                draft_wc, target_words, draft_wc * 100 // max(target_words, 1))
 
-    if draft_wc < target_words * 0.4 and can_retry(base, "phase_6_wordcount",
-            reason=f"Draft {draft_wc}w < 40% of target {target_words}w"):
+    if draft_wc < target_words * 0.4 and can_retry(base, "phase_5_wordcount"):
+        logger.warning("Phase 5 RETRY: {}w < 40% of target {}w — deleting v1.md", draft_wc, target_words)
         (base / "draft" / "v1.md").unlink()
         return {
             "action": "launch_single",
-            "phase": 6, "phase_name": "Editing (retry)",
+            "phase": 5, "phase_name": "Editing (retry)",
             "agent": "Editor",
             "prompt": prompt_editor(base) + f"\nCRITICAL: Target ~{target_words} words. Do NOT lose content.",
             "output_file": "draft/v1.md",
             "description": "Retry merge",
         }
 
-    # ═══════════ Phase 7: Review — sub-agent returns text ═══════════
+    # ═══════════ Phase 6: Review — sub-agent returns text ═══════════
     review_file = base / "draft" / "_review.md"
     if not review_file.exists():
+        logger.info("Phase 6: Launching Critic — draft {}w, target {}w", draft_wc, target_words)
         return {
             "action": "launch_single",
-            "phase": 7, "phase_name": "Review",
+            "phase": 6, "phase_name": "Review",
             "agent": "Critic",
             "prompt": prompt_critic(base, max_pages),
             "output_file": "draft/_review.md",
@@ -756,6 +742,7 @@ def cmd_next(base_folder: str) -> dict:
 
     # ── Handle Verdict ──
     verdict = parse_verdict(base)
+    logger.info("Phase 6 verdict={}, revisions={}", verdict, revision_count(base))
     if verdict == "REVISE":
         rev_count = revision_count(base)
         if rev_count < 2:
@@ -766,89 +753,108 @@ def cmd_next(base_folder: str) -> dict:
                 f.unlink()
             return cmd_next(base_folder)
 
-    # ═══════════ Phase 8: Illustration — ORCHESTRATOR runs PaperBanana ═══════════
+    # ═══════════ Phase 7: Illustration — ORCHESTRATOR runs PaperBanana ═══════════
     draft_text = (base / "draft" / "v1.md").read_text(encoding='utf-8')
     has_png_refs = bool(re.search(r'!\[.*?\]\(.*?\.png\)', draft_text))
     manifest = base / "illustrations" / "_manifest.md"
+    fig_label = "Рис." if "russian" in params.get("language", "russian").lower() else "Fig."
+    ill_mode = params.get("illustration mode", "pipeline").strip().lower()
 
     if not manifest.exists():
+        logger.info("Phase 7: Illustration — manifest missing, generating (mode={})", ill_mode)
         if not os.environ.get("OPENAI_API_KEY"):
+            logger.warning("Phase 7: OPENAI_API_KEY not set, skipping illustrations")
             return {
                 "action": "warning",
-                "phase": 8, "phase_name": "Illustration (skipped)",
+                "phase": 7, "phase_name": "Illustration (skipped)",
                 "message": "OPENAI_API_KEY not set. Skipping illustrations.",
             }
 
         placeholders = re.findall(r'<!-- ILLUSTRATION:(.+?)-->', draft_text)
+        logger.debug("Phase 7: found {} ILLUSTRATION placeholders in draft", len(placeholders))
         illustrations = []
         for i, ph in enumerate(placeholders, 1):
             desc_m = re.search(r'description="([^"]+)"', ph)
             type_m = re.search(r'type="([^"]+)"', ph)
             desc = desc_m.group(1) if desc_m else f"Technical diagram {i}"
             itype = type_m.group(1) if type_m else "architecture"
+            short_desc = desc[:80]
             illustrations.append({
                 "index": i, "type": itype, "description": desc,
                 "placeholder": f"<!-- ILLUSTRATION:{ph}-->",
                 "output_png": f"illustrations/diagram_{i}.png",
-                "embed_as": f"![Рис. {i}. {desc[:60]}](../illustrations/diagram_{i}.png)",
+                "embed_as": (
+                    f"![{fig_label} {i}. {short_desc}](../illustrations/diagram_{i}.png)\n\n"
+                    f"*{fig_label} {i}. {short_desc}*"
+                ),
             })
 
         if not illustrations:
+            fallback_items = [
+                (1, "architecture", "High-level architecture overview"),
+                (2, "comparison", "Platform feature comparison"),
+                (3, "pipeline", "Execution flow pipeline"),
+            ]
             illustrations = [
-                {"index": 1, "type": "architecture",
-                 "description": "High-level architecture overview",
-                 "output_png": "illustrations/diagram_1.png",
-                 "embed_as": "![Рис. 1](../illustrations/diagram_1.png)"},
-                {"index": 2, "type": "comparison",
-                 "description": "Platform feature comparison",
-                 "output_png": "illustrations/diagram_2.png",
-                 "embed_as": "![Рис. 2](../illustrations/diagram_2.png)"},
-                {"index": 3, "type": "pipeline",
-                 "description": "Execution flow pipeline",
-                 "output_png": "illustrations/diagram_3.png",
-                 "embed_as": "![Рис. 3](../illustrations/diagram_3.png)"},
+                {"index": idx, "type": itype, "description": desc,
+                 "output_png": f"illustrations/diagram_{idx}.png",
+                 "embed_as": (
+                     f"![{fig_label} {idx}. {desc}](../illustrations/diagram_{idx}.png)\n\n"
+                     f"*{fig_label} {idx}. {desc}*"
+                 )}
+                for idx, itype, desc in fallback_items
             ]
 
+        direct_flag = ' --direct' if ill_mode == 'direct' else ''
         return {
             "action": "orchestrator_illustrate",
-            "phase": 8, "phase_name": "Illustration",
+            "phase": 7, "phase_name": "Illustration",
             "count": len(illustrations),
             "illustrations": illustrations,
+            "fig_label": fig_label,
             "draft_file": "draft/v1.md",
             "instructions": (
                 "For each illustration:\n"
                 "1. Run: python3 .github/skills/image-generator/scripts/"
-                "paperbanana_generate.py \"[short 2-4 sentence prompt]\" "
-                "\"BASE_FOLDER/[output_png]\" --direct\n"
-                "2. Embed PNG in draft/v1.md (replace placeholder or insert near section)\n"
+                f"paperbanana_generate.py \"[description]\" "
+                f"\"BASE_FOLDER/[output_png]\"{direct_flag}"
+                + (" --context \"[200-500 words section text]\" --critic-rounds 2\n" if ill_mode != 'direct' else "\n")
+                + "   Use run_in_terminal with timeout=0 (no limit, pipeline takes 3-5 min)\n"
+                "2. Embed in draft/v1.md: replace placeholder with embed_as (image + caption)\n"
                 "3. Write manifest to illustrations/_manifest.md\n"
                 "4. VERIFY: grep '.png' in v1.md — must find refs"
             ),
         }
 
     pngs = list((base / "illustrations").glob("*.png"))
-    if pngs and not has_png_refs and can_retry(base, "phase_8_embed",
-            reason=f"{len(pngs)} PNGs exist but not embedded in draft"):
+    if pngs and not has_png_refs and can_retry(base, "phase_7_embed"):
         manifest.unlink()
         return {
             "action": "orchestrator_illustrate",
-            "phase": 8, "phase_name": "Illustration (retry — embed)",
+            "phase": 7, "phase_name": "Illustration (retry — embed)",
             "count": len(pngs),
             "illustrations": [
                 {"index": i+1, "output_png": f"illustrations/{p.name}",
-                 "embed_as": f"![Рис. {i+1}](../illustrations/{p.name})"}
+                 "embed_as": (
+                     f"![{fig_label} {i+1}. {p.stem}](../illustrations/{p.name})\n\n"
+                     f"*{fig_label} {i+1}. {p.stem}*"
+                 )}
                 for i, p in enumerate(pngs)
             ],
+            "fig_label": fig_label,
             "draft_file": "draft/v1.md",
-            "instructions": "PNGs exist but not in v1.md. Embed them. Rewrite manifest.",
+            "instructions": "PNGs exist but not in v1.md. Embed them (image + caption). Rewrite manifest.",
         }
 
-    # ═══════════ Phase 9: Delivery ═══════════
+    # ═══════════ Phase 8: Delivery ═══════════
     draft_text = (base / "draft" / "v1.md").read_text(encoding='utf-8')
     final_wc = word_count(base / "draft" / "v1.md")
+    logger.success("Phase 8: COMPLETE — {}w, ~{:.1f} pages, {} sections, {} illustrations",
+                   final_wc, final_wc / 300, len(toc_sections),
+                   len(list((base / 'illustrations').glob('*.png'))))
     return {
         "action": "complete",
-        "phase": 9, "phase_name": "Delivery",
+        "phase": 8, "phase_name": "Delivery",
         "document": str(base / "draft" / "v1.md"),
         "stats": {
             "words": final_wc,
@@ -886,7 +892,7 @@ def cmd_status(base_folder: str) -> dict:
     links_info = {}
     for d in subtopic_dirs:
         links_info[d.name] = count_urls(d / "_links.md")
-    status["phases"]["1_retrieval"] = {
+    status["phases"]["1_research"] = {
         "topics": len(subtopic_dirs),
         "urls_per_topic": links_info,
         "total_urls": sum(links_info.values()),
@@ -899,14 +905,14 @@ def cmd_status(base_folder: str) -> dict:
             "count": len(exts),
             "total_words": sum(word_count(e) for e in exts),
         }
-    status["phases"]["2_extraction"] = extract_info
+    status["phases"]["1_extraction"] = extract_info
 
-    status["phases"]["3_analysis"] = {
+    status["phases"]["2_analysis"] = {
         d.name: (d / "_structure.md").exists() for d in subtopic_dirs
     }
 
     toc = parse_toc_sections(base)
-    status["phases"]["4_planning"] = {
+    status["phases"]["3_planning"] = {
         "has_toc": (base / "research" / "_plan" / "toc.md").exists(),
         "sections": len(toc),
         "total_pages": sum(s["pages"] for s in toc) if toc else 0,
@@ -926,11 +932,11 @@ def cmd_status(base_folder: str) -> dict:
             }
         else:
             section_info[s["num"]] = {"file": None, "words": 0, "target": s["words"]}
-    status["phases"]["5_writing"] = {"sections": section_info, "total_placeholders": total_pl}
+    status["phases"]["4_writing"] = {"sections": section_info, "total_placeholders": total_pl}
 
-    status["phases"]["6_editing"] = {"has_draft": v1.exists(), "words": word_count(v1)}
+    status["phases"]["5_editing"] = {"has_draft": v1.exists(), "words": word_count(v1)}
 
-    status["phases"]["7_review"] = {
+    status["phases"]["6_review"] = {
         "has_review": (base / "draft" / "_review.md").exists(),
         "verdict": parse_verdict(base),
         "revisions": revision_count(base),
@@ -938,7 +944,7 @@ def cmd_status(base_folder: str) -> dict:
 
     pngs = list((base / "illustrations").glob("*.png"))
     dt = v1.read_text(encoding='utf-8') if v1.exists() else ""
-    status["phases"]["8_illustration"] = {
+    status["phases"]["7_illustration"] = {
         "png_files": len(pngs),
         "embedded_refs": len(re.findall(r'!\[.*?\]\(.*?\.png\)', dt)),
         "manifest": (base / "illustrations" / "_manifest.md").exists(),
@@ -955,7 +961,7 @@ def cmd_status(base_folder: str) -> dict:
 def main():
     if len(sys.argv) < 2:
         print(json.dumps({
-            "error": "Usage: pipeline_runner.py <command> [base_folder]",
+            "error": "Usage: research_pipeline_runner.py <command> [base_folder]",
             "commands": {
                 "init [folder]": "Create folder structure",
                 "next <folder>": "Get next pipeline action",
@@ -968,27 +974,18 @@ def main():
 
     if command == "init":
         folder = sys.argv[2] if len(sys.argv) >= 3 else f"generated_docs_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-        setup_logging(folder)
         result = cmd_init(folder)
     elif command in ("next", "status"):
         if len(sys.argv) < 3:
-            print(json.dumps({"error": f"Usage: pipeline_runner.py {command} <base_folder>"}))
+            print(json.dumps({"error": f"Usage: research_pipeline_runner.py {command} <base_folder>"}))
             sys.exit(1)
-        setup_logging(sys.argv[2])
-        logging.info("cmd=%s folder=%s", command, sys.argv[2])
-        if command == "next":
-            result = cmd_next(sys.argv[2])
-            phase = result.get("phase")
-            if phase is not None:
-                record_phase_timing(Path(sys.argv[2]).resolve(), phase, result.get("phase_name", ""))
-            result = _with_log(result, sys.argv[2])
-        else:
-            result = cmd_status(sys.argv[2])
+        result = cmd_next(sys.argv[2]) if command == "next" else cmd_status(sys.argv[2])
     else:
-        setup_logging()
         result = {"error": f"Unknown command: {command}"}
 
-    logging.info("Result: action=%s phase=%s", result.get("action"), result.get("phase"))
+    logger.debug("CMD {}: action={}, phase={}", command,
+                 result.get("action", result.get("status", "?")),
+                 result.get("phase", "-"))
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
 
@@ -996,11 +993,6 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        tb = traceback.format_exc()
-        logging.error("Pipeline error: %s\n%s", e, tb)
-        print(json.dumps({
-            "action": "error",
-            "message": f"Script error: {e}",
-            "traceback": tb,
-        }, ensure_ascii=False))
+        logger.opt(exception=True).error("Script crash: {}", e)
+        print(json.dumps({"action": "error", "message": f"Script error: {e}"}, ensure_ascii=False))
         sys.exit(1)

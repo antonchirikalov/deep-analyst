@@ -16,11 +16,7 @@ Execute phases sequentially. Validate outputs between phases. Log every transiti
 
 1. Generate timestamp: `YYYYMMDD_HHMMSS`
 2. Create BASE_FOLDER: `generated_docs_{timestamp}/`
-3. Initialize workflow log:
-   ```bash
-   python3 .github/skills/workflow-logger/scripts/workflow-logger.py init \
-     --folder $BASE_FOLDER --project "$TITLE"
-   ```
+
 4. Parse user request into parameters:
    - `max_pages` — see size tier table in agent file
    - `audience`, `tone`, `formulas`, `language`
@@ -40,7 +36,6 @@ Execute phases sequentially. Validate outputs between phases. Log every transiti
    2. {subtopic_2}
    ...
    ```
-6. Log via agent-trace: `--action write --target "research/_plan/params.md"`
 
 ### Phase 1: Retrieval (Retriever × N, parallel)
 
@@ -54,10 +49,7 @@ Write results to: research/{subtopic_slug}/_links.md
 ```
 
 **Validation after Phase 1:**
-```bash
-python3 .github/skills/workflow-logger/scripts/agent-trace.py check \
-  --folder $BASE_FOLDER --file "research/{subtopic}/_links.md"
-```
+- Check each `_links.md` file exists and is non-empty
 - Present and non-empty → proceed
 - Missing or empty → skip this subtopic in Phases 2-3, log warning
 
@@ -199,17 +191,11 @@ Write review to: draft/_review.md
 **If APPROVED:** Proceed to Phase 8.
 
 **If REVISE or REJECTED:**
-- Log revision via `workflow-logger.py verdict`
 - Parse `## Sections to revise` for section filenames and issues
 - Re-run ONLY the listed Writers (with revision flag) → Phase 5 (partial)
 - Re-run Editor → Phase 6
 - Re-run Critic → Phase 7
-- **Max 2 revision loops.** After 2 loops → accept as-is, log warning:
-  ```bash
-  python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-    --folder $BASE_FOLDER --agent Orchestrator --phase 7 \
-    --action skip --status warn --detail "Max revisions reached, accepting draft as-is"
-  ```
+- **Max 2 revision loops.** After 2 loops → accept as-is, log warning.
 
 ### Phase 8: Illustration (Illustrator × 1)
 
@@ -223,7 +209,7 @@ Generate illustrations for the final draft: draft/v1.md
 STEPS (ALL MANDATORY):
 1. Read draft/v1.md, find <!-- ILLUSTRATION: ... --> placeholders.
 2. If NO placeholders found: independently identify 3-5 sections that need architecture/comparison/pipeline diagrams.
-3. For each illustration: run paperbanana_generate.py with --direct mode and a SHORT 2-4 sentence prompt.
+3. For each illustration: run paperbanana_generate.py with full pipeline: --context "[200-500 words section text]" --critic-rounds 2. Use timeout=0 (no limit, pipeline takes 3-5 min).
 4. If paperbanana fails: FALLBACK to Mermaid diagrams — generate mermaid code blocks and embed them DIRECTLY in draft/v1.md.
 5. EMBED every illustration in draft/v1.md using replace_string_in_file:
    - PNGs: replace placeholder or insert ![Рис. N](../illustrations/NN_name.png) near the relevant H2
@@ -239,12 +225,7 @@ STEPS (ALL MANDATORY):
 
 ### Phase 9: Delivery (Orchestrator)
 
-1. Log pipeline completion:
-   ```bash
-   python3 .github/skills/workflow-logger/scripts/workflow-logger.py event \
-     --folder $BASE_FOLDER --message "Pipeline complete. Final document: draft/v1.md"
-   ```
-2. Report to user:
+1. Report to user:
    - Final document path
    - Page count and word count
    - Number of illustrations generated

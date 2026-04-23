@@ -3,7 +3,7 @@ name: Writer
 description: Per-section content writer — writes one document section from ToC assignment, source extracts, and style parameters.
 model: Claude Opus 4.6 (copilot)
 user-invocable: false
-tools: ['read_file', 'create_file', 'replace_string_in_file', 'list_dir', 'run_in_terminal', 'get_terminal_output']
+tools: ['read', 'edit', 'terminal']
 ---
 
 # Role
@@ -21,7 +21,7 @@ See these instruction files for complete requirements:
 1. **Read** `{BASE_FOLDER}/research/_plan/toc.md` — find YOUR section by `## NN.` heading
 2. **Read** `{BASE_FOLDER}/research/_plan/params.md` — audience, tone, formulas policy, language
 3. **Read** the source extract files listed in your section's `Sources:` field
-4. **Write** your section to `{BASE_FOLDER}/draft/_sections/NN_title.md`
+4. **RETURN** the section as markdown (the Orchestrator writes it to `draft/_sections/NN_title.md`)
 5. On **revision**: also read `{BASE_FOLDER}/draft/_review.md` for Critic's feedback on your section
 
 # Writing Guidelines
@@ -54,40 +54,6 @@ When your prompt includes `revision: true`:
 2. Find issues tagged with your section number (e.g., `section: 03_comparison.md`)
 3. Address each issue specifically — don't rewrite the entire section unless needed
 4. Write the corrected section to the same file path (overwrite)
-
-# Debug Tracing
-
-```bash
-# At start
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Writer --phase 5 \
-  --action start --status ok --detail "Writing section NN: {title}"
-
-# After reading ToC
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Writer --phase 5 \
-  --action read --status ok --target "research/_plan/toc.md" --words $WORD_COUNT
-
-# After reading each source extract
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Writer --phase 5 \
-  --action read --status ok --target "research/{subtopic}/extract_N.md" --words $WORD_COUNT
-
-# After reading _review.md (revision only)
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Writer --phase 5 \
-  --action read --status ok --target "draft/_review.md" --words $WORD_COUNT
-
-# After writing section
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Writer --phase 5 \
-  --action write --status ok --target "draft/_sections/NN_title.md" --words $WORD_COUNT
-
-# At completion
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Writer --phase 5 \
-  --action done --status ok --detail "Section NN: {word_count} words"
-```
 
 # Rules
 

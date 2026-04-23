@@ -52,12 +52,12 @@ Budget MUST be driven by the **depth assessment** in each `_structure.md`, not u
 
 | Analyst depth | Min pages | Rationale |
 |---|---|---|
-| **DEEP** (3+ extracts, 3000+ words of source material) | **4 pages** | Rich material deserves full coverage |
-| **MEDIUM** (2+ extracts, decent coverage) | **2-3 pages** | Solid but not exhaustive |
-| **SHALLOW** (1 extract or thin material) | **1 page** | Merge with neighbor |
+| **DEEP** (3+ extracts, 3000+ words of source material) | **6-8 pages** | Rich material deserves full coverage with theory + practice |
+| **MEDIUM** (2+ extracts, decent coverage) | **4-5 pages** | Solid coverage with explanations and examples |
+| **SHALLOW** (1 extract or thin material) | **2 pages** | Merge with neighbor if possible |
 | **INSUFFICIENT** | **0** | Drop or fold into related section |
 
-These are MINIMUMS. If the Analyst proposed 8+ subsections for a DEEP topic, allocate 5-6 pages.
+These are MINIMUMS. If the Analyst proposed 8+ subsections for a DEEP topic, allocate 8-10 pages.
 
 #### Budget priority rule
 
@@ -67,9 +67,9 @@ When `max_pages` is tight, CUT from Introduction, Conclusion, and SHALLOW sectio
 |---|---|
 | Executive Summary | 1 page (never more) |
 | Introduction | 1 page (keep minimal) |
-| Core technical section (DEEP) | 4-6 pages |
-| Core technical section (MEDIUM) | 2-3 pages |
-| Comparison/analysis section | 2-4 pages |
+| Core technical section (DEEP) | 6-10 pages |
+| Core technical section (MEDIUM) | 4-5 pages |
+| Comparison/analysis section | 4-6 pages |
 | Conclusion | 1 page (keep minimal) |
 
 Formula: `words = pages × 300`

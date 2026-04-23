@@ -17,8 +17,8 @@ The `paperbanana` package handles prompt engineering, reference retrieval, aesth
 
 ## Phase 1: Plan
 
-1. Read the final draft (`generated_docs_[TIMESTAMP]/draft/v1.md`)
-2. **Extract all `<!-- ILLUSTRATION: type=..., section=..., description="..." -->` placeholders** left by the Writer
+1. Read the final draft (`generated_docs_[TIMESTAMP]/draft/v1.md`) and `research/_plan/params.md`
+2. **Extract all `<!-- ILLUSTRATION: type=..., section=..., description="..." -->` placeholders** left by the Writer. Each placeholder has a caption line below it: `*Рис. N. Caption*`
 3. For each placeholder, parse:
    - `type` — architecture, comparison, pipeline, infographic, conceptual
    - `section` — which document section this belongs to
@@ -28,15 +28,12 @@ The `paperbanana` package handles prompt engineering, reference retrieval, aesth
    - Pipeline/workflow descriptions
    - Comparison sections with complex relationships
    - Abstract concepts that benefit from visual representation
-5. For each illustration, craft **one optimized prompt** using the PaperBanana Golden Schema:
-   - Use the Writer's description as the primary input
-   - Choose the best composition for the content type:
-     - **Horizontal (LR)** — flows, pipelines, timelines, sequences (default for most)
-     - **Vertical (TB)** — hierarchies, layered architectures, decision trees
-     - **Radial** — comparisons, ecosystems, hub-spoke relationships
-   - Include: all elements, connections/arrows, spatial layout, colors, shape preferences
-   - Always end with: "Clean white background, no text overlapping elements"
+5. For each illustration, prepare:
+   - **Description** (2-6 sentences): what to visualize, key components, relationships. Use the Writer's `description` as the primary input.
+   - **Context** (200-500 words): copy the relevant section text from the draft for the Planner agent to understand the domain.
+   - Do NOT micro-manage layout, colors, composition, or background — PaperBanana's Planner/Stylist/Critic agents handle all styling decisions internally.
 6. Record the plan internally before proceeding to generation.
+7. Determine illustration label from params.md `language`: Russian → "Рис.", English → "Fig."
 
 ## Phase 2: Generate
 
@@ -44,28 +41,22 @@ The `paperbanana` package handles prompt engineering, reference retrieval, aesth
 
 For each illustration, select the mode based on type:
 
-| Illustration Type | Mode | Command |
+| Mode | When to use | Command |
 |---|---|---|
-| `architecture`, `comparison`, `pipeline`, `flowchart`, `conceptual`, `infographic`, `timeline`, `mindmap` | **`--direct`** | `python3 .github/skills/image-generator/scripts/paperbanana_generate.py "[SHORT prompt]" "generated_docs_[TIMESTAMP]/illustrations/diagram_N.png" --direct` |
-| `statistical_plot`, `methodology` (data-heavy charts) | **pipeline** | `python3 .github/skills/image-generator/scripts/paperbanana_generate.py "[description]" "generated_docs_[TIMESTAMP]/illustrations/diagram_N.png" --context "[section text]"` |
+| **pipeline** (default) | All illustrations | `python3 ... "[description]" "path.png" --context "[section text]" --critic-rounds 2` |
+| **`--direct`** | When `--direct` flag is explicitly requested | `python3 ... "[SHORT prompt]" "path.png" --direct` |
 
-**Default: `--direct`** for everything except statistical/data plots.
+> **Pipeline takes 3–5 min per illustration (5–7 API calls).** Always use `run_in_terminal` with `timeout: 0` (no timeout limit).
 
 ### Step 2: Craft the Prompt
 
-**For `--direct` mode (most illustrations):**
+**For pipeline mode (DEFAULT — all illustrations):**
 
-Keep prompts **SHORT** — 2-4 sentences, max ~100 words. The script auto-prepends vector-style instructions.
+Provide a clear description (2-6 sentences) and pass 200-500 words of section context via `--context`. The Planner/Stylist/Critic cycle handles layout, colors, and refinement automatically. Do NOT add styling instructions — PaperBanana does this internally.
 
-- Describe visual structure (columns, hierarchy, flow direction)
-- Name key blocks with color categories (e.g., "blue for Copilot, orange for Claude")
-- Describe connections briefly (arrows, lines)
-- Do NOT enumerate exact text labels, positions, or pixel sizes
-- Do NOT write the PaperBanana Golden Schema for direct mode — it causes text-heavy ASCII-art output
+**For `--direct` mode (when set in params.md or explicitly requested):**
 
-**For pipeline mode (statistical plots):**
-
-Use the full PaperBanana approach — the Planner/Stylist/Critic cycle is optimized for data visualizations. Pass 200-500 words of section context via `--context`.
+Keep prompts **SHORT** — 2-4 sentences, max ~100 words. The script auto-prepends vector-style instructions. See [style-guidelines](style-guidelines.instructions.md) for examples.
 
 ### Step 3: Generate
 
@@ -73,20 +64,77 @@ Run one command per illustration. After all are generated:
 
 1. **EMBED ILLUSTRATIONS IN THE DOCUMENT** — this step is MANDATORY:
 
+   Every embedded illustration MUST have **two lines**: an image link and a visible italic caption:
+   ```markdown
+   ![Рис. 1. Caption text](../illustrations/diagram_1.png)
+
+   *Рис. 1. Caption text*
+   ```
+   Use "Рис." for Russian, "Fig." for English (from params.md language).
+
    **Path A — Placeholders exist:**
-   Replace each `<!-- ILLUSTRATION: ... -->` placeholder in the draft (`generated_docs_[TIMESTAMP]/draft/v1.md`) with `![Рис. N](../illustrations/NN_name.png)` (path relative to `draft/v1.md` — resolves to `illustrations/` at the output folder root). **Keep the caption line** `*[Рис. N. Caption]*` that the Writer placed below the placeholder — only replace the HTML comment, not the caption.
+   Replace each `<!-- ILLUSTRATION: ... -->` placeholder in the draft with the image link line. The Writer already placed a `*Рис. N. Caption*` caption below the placeholder — **keep it**, only replace the HTML comment.
 
    **Path B — No placeholders (fallback):**
    You MUST STILL embed illustrations. For each generated PNG:
    - Find the target section heading (H2 `##`) in `draft/v1.md`
    - Locate the end of the first paragraph after that heading
-   - Use `replace_string_in_file` to insert `\n\n![Рис. N. Caption](../illustrations/NN_name.png)\n` right after that paragraph
-   - Example: find `## 3. Architecture\n\nFirst paragraph text here.` and insert the image reference after the first paragraph
+   - Insert both the image link AND the italic caption line
 
-2. Create `generated_docs_[TIMESTAMP]/illustrations/_manifest.md`
+2. Create `illustrations/_manifest.md` — must include **Regeneration Prompts** section (see below).
 3. **VERIFY:** Read v1.md and confirm every generated PNG is referenced. If any is missing, insert it.
 
 **Output without embedded images = FAILED. Every PNG must appear as `![...]` in v1.md.**
+
+## Manifest Format (with Regeneration Prompts)
+
+The `_manifest.md` MUST contain two parts:
+
+**Part 1 — Summary table:**
+```markdown
+# Illustration Manifest
+
+| # | File | Section | Type | Description |
+|---|------|---------|------|-------------|
+| 1 | diagram_1.png | §02 | flow | Short description |
+...
+
+## Generation Details
+- **Generator:** PaperBanana (model versions)
+- **Critic rounds:** N
+- **Generated:** YYYY-MM-DD
+```
+
+**Part 2 — Regeneration prompts (MANDATORY):**
+
+For EACH diagram, record the exact description, context, and full CLI command used to generate it. This enables one-command regeneration without reconstructing prompts.
+
+```markdown
+## Regeneration Prompts
+
+### diagram_N.png (§NN — Short Title)
+
+**Description:**
+\`\`\`
+The exact description string passed to paperbanana_generate.py
+\`\`\`
+
+**Context:**
+\`\`\`
+The exact context string passed via --context
+\`\`\`
+
+**Command:**
+\`\`\`bash
+.venv/bin/python3 .github/skills/image-generator/scripts/paperbanana_generate.py \
+  "description..." \
+  "illustrations/diagram_N.png" \
+  --context "context..." \
+  --critic-rounds 2
+\`\`\`
+```
+
+This section is critical for re-runs and selective regeneration.
 
 ## Re-run Behavior
 

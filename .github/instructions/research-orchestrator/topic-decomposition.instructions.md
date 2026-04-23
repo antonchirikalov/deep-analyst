@@ -41,13 +41,13 @@ Default: `audience: technical`, `tone: academic`.
 
 ### Formulas policy
 
-Default: `formulas: minimal, always with intuitive explanation`
+Default: `formulas: avoid — only essential formulas, always preceded by 2+ paragraphs of conceptual explanation. Never start a subsection with a formula.`
 
 Override only if user explicitly requests math-heavy content.
 
 ## Subtopic Decomposition
 
-Break the main topic into **5-8 subtopics** for parallel research.
+Break the main topic into **7-12 subtopics** for parallel research. More subtopics = deeper coverage. For "detailed" documents, prefer 10-12 subtopics.
 
 ### Decomposition principles
 
@@ -55,6 +55,7 @@ Break the main topic into **5-8 subtopics** for parallel research.
 2. **Searchable terms** — each subtopic should yield good search results (use common terms, not jargon)
 3. **Balanced scope** — each subtopic should produce roughly similar amount of material
 4. **Research-oriented** — subtopics are search directions, NOT document sections (Planner reorganizes later)
+5. **Granularity over breadth** — prefer splitting a broad area into 2-3 focused subtopics rather than one giant one. E.g., instead of "optimization techniques" → split into "quantization methods", "attention optimization", "batching and scheduling"
 
 ### Subtopic naming
 
@@ -89,4 +90,4 @@ Subtopics:
 
 Write `research/_plan/params.md` with the structure shown in the agent file.
 
-The subtopic list in params.md drives the parallelism in Phases 1-3: one Retriever/Extractor/Analyst per subtopic.
+The subtopic list in params.md drives the parallelism: one Researcher per subtopic (Phase 1), one Analyst per subtopic (Phase 2).

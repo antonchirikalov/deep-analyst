@@ -3,7 +3,7 @@ name: Arch Assessor
 description: "Architecture assessment agent — reads extracts for one source area, identifies patterns, anti-patterns, tech debt, pain points, and opportunities."
 model: Claude Sonnet 4.6 (copilot)
 user-invocable: false
-tools: ['read_file', 'list_dir', 'run_in_terminal', 'get_terminal_output']
+tools: ['read', 'terminal']
 ---
 
 # Role

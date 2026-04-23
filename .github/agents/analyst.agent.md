@@ -3,7 +3,7 @@ name: Analyst
 description: Per-topic structure analysis — reads all extracts for one subtopic, proposes sections, assesses depth, maps sources.
 model: Claude Sonnet 4.6 (copilot)
 user-invocable: false
-tools: ['read_file', 'create_file', 'list_dir', 'run_in_terminal', 'get_terminal_output']
+tools: ['read', 'terminal']
 ---
 
 # Role
@@ -22,7 +22,7 @@ See these instruction files for complete requirements:
 2. **Assess depth** of available material: DEEP / MEDIUM / SHALLOW / INSUFFICIENT
 3. **Propose sections** that could be written from this material — with source mapping
 4. **Identify cross-references** with other potential subtopics
-5. **Write `_structure.md`** in the exact format below
+5. **RETURN** the analysis as markdown (the Orchestrator writes it to `_structure.md`)
 
 # Input
 
@@ -31,7 +31,7 @@ See these instruction files for complete requirements:
 
 # Output Format
 
-Write to `{BASE_FOLDER}/research/{subtopic}/_structure.md`:
+RETURN markdown in this exact format (start directly with content, no preamble):
 
 ```markdown
 # Structure: {subtopic_name}
@@ -60,30 +60,6 @@ Write to `{BASE_FOLDER}/research/{subtopic}/_structure.md`:
 | **MEDIUM** | 2+ extracts, decent but some gaps | Can support 1-3 pages |
 | **SHALLOW** | 1 extract or thin material | Merge with neighboring section |
 | **INSUFFICIENT** | No usable content | Skip or merge with related topic |
-
-# Debug Tracing
-
-```bash
-# At start
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Analyst --phase 3 \
-  --action start --status ok --detail "Analyzing: {subtopic_name}"
-
-# After reading each extract
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Analyst --phase 3 \
-  --action read --status ok --target "research/{subtopic}/extract_N.md" --words $WORD_COUNT
-
-# After writing _structure.md
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Analyst --phase 3 \
-  --action write --status ok --target "research/{subtopic}/_structure.md" --words $WORD_COUNT
-
-# At completion
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Analyst --phase 3 \
-  --action done --status ok --detail "Depth: {LEVEL}, proposed N sections"
-```
 
 # Rules
 

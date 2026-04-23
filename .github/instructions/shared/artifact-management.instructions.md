@@ -22,9 +22,6 @@ Every sub-agent receives `BASE_FOLDER` in its prompt — the absolute path to `g
 
 ```
 generated_docs_YYYYMMDD_HHMMSS/
-├── workflow_log.md            ← Orchestrator (workflow-logger.py)
-├── agent_trace.jsonl          ← ALL agents (agent-trace.py, machine-readable)
-├── agent_trace.md             ← ALL agents (agent-trace.py, human-readable)
 ├── research/
 │   ├── _plan/
 │   │   ├── params.md          ← Orchestrator (Phase 0)
@@ -76,9 +73,7 @@ generated_docs_YYYYMMDD_HHMMSS/
 - Image files: named by Illustrator based on section and description
 
 ### Log files
-- `workflow_log.md` — Orchestrator only, via workflow-logger.py
-- `agent_trace.jsonl` — ALL agents, via agent-trace.py, appended
-- `agent_trace.md` — ALL agents, via agent-trace.py, appended
+- `pipeline.log` — written automatically by pipeline_runner.py (loguru)
 
 ## Path Construction Examples
 
@@ -115,11 +110,3 @@ Given `BASE_FOLDER = /Users/user/project/generated_docs_20260307_143000/`:
 | `_manifest.md` | Created once in Phase 8 |
 
 ## Validation
-
-Use `agent-trace.py check` to verify file existence and minimum word count:
-```bash
-python3 .github/skills/workflow-logger/scripts/agent-trace.py check \
-  --folder $BASE_FOLDER --file "research/{subtopic}/_links.md"
-```
-
-This returns exit code 0 if file exists and has content, non-zero otherwise.

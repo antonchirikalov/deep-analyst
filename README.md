@@ -2,7 +2,7 @@
 
 Multi-agent platform for GitHub Copilot with **two independent pipelines**: deep web research and architecture analysis. Both produce publication-quality documents with illustrations, peer review, and optional PDF/Confluence export.
 
-Built on GitHub Copilot agent mode with 15 specialized agents, 2 Python state machines, and the PaperBanana illustration system.
+Built on GitHub Copilot agent mode with **15 specialized agents**, **2 Python state machines**, and the **PaperBanana** illustration system (`gpt-image-1.5`).
 
 ![Platform Overview](docs/images/platform_overview.png)
 
@@ -10,27 +10,31 @@ Built on GitHub Copilot agent mode with 15 specialized agents, 2 Python state ma
 
 ## Two Pipelines
 
-Deep Analyst provides two entry points — each launches a fully automated pipeline driven by a Python state machine. The orchestrator agent is a "dumb scheduler": it reads the next action from the script and executes it.
+Each pipeline is driven by a Python state machine. The orchestrator agent is a "dumb scheduler": it reads the next action from the script and executes it.
 
 | | **Research Pipeline** | **Architecture Pipeline** |
 |---|---|---|
 | **Entry point** | `@research-orchestrator` | `@architecture-orchestrator` |
-| **State machine** | `pipeline_runner.py` | `arch_pipeline_runner.py` |
+| **State machine** | `research_pipeline_runner.py` | `arch_pipeline_runner.py` |
 | **Input** | Research question / topic | Code, docs, configs, Confluence, web |
 | **Output** | Analytical document (15–100 pages) | Architecture proposal with options & trade-offs |
 | **Folder prefix** | `generated_docs_*` | `generated_arch_*` |
-| **Phases** | 0–8 (Decompose → Research → Analyze → Plan → Write → Edit → Review → Illustrate → Deliver) | 0–9 (Decompose → Source Analysis → Assess → Propose → Plan → Write → Edit → Review → Illustrate → Deliver) |
+| **Phases** | 0–8 | 0–9 |
 
 ### Shared components
 
 Both pipelines share these agents and infrastructure:
-- **Planner** — builds Table of Contents with page budgets
-- **Writer** (Opus) — writes one section at a time from source material
-- **Editor** (Opus) — merges sections, deduplicates, adds transitions
-- **Critic** — structured review with APPROVED / REVISE verdict
-- **Illustrator** — PaperBanana PNG generation via `gpt-image-1.5`
-- **PDF Exporter** — Markdown → PDF conversion
-- **Confluence Publisher** — publishes to Confluence with images via REST API
+- **Planner** (Opus 4.6) — builds Table of Contents with page budgets and source assignments
+- **Writer** (Opus 4.6) — writes one section at a time from source material
+- **Editor** (Opus 4.6) — merges sections, deduplicates, adds transitions and executive summary
+- **Critic** (Sonnet 4.6) — structured review with APPROVED / REVISE verdict (max 2 revision loops)
+- **Illustrator** (Sonnet 4.6) — PaperBanana PNG generation (`gpt-5.2` VLM + `gpt-image-1.5` image gen)
+- **PDF Exporter** (Haiku 4.5) — Markdown → PDF via WeasyPrint with publication-quality CSS
+- **Confluence Publisher** (Haiku 4.5) — publishes to Confluence with images via REST API
+
+### Standalone agents
+
+- **Requirements Analyst** (Opus 4.6) — reads input documents (briefs, transcripts, designs, Q&A) and produces structured `_requirements.md` with traceability, conflict detection, and gap analysis. Use as a pre-pipeline step before Architecture Orchestrator.
 
 ---
 
@@ -55,14 +59,16 @@ The Orchestrator parses the query, applies defaults for missing parameters, and 
 | Phase | Agent | Action | Output |
 |-------|-------|--------|--------|
 | 0 | Orchestrator | Parse query → `params.md` with subtopics | `research/_plan/params.md` |
-| 1 | Researcher ×N | Search + extract per subtopic (parallel) | `research/{subtopic}/_links.md` + `extract_*.md` |
-| 2 | Analyst ×N | Analyze extracts per subtopic → section proposals | `research/{subtopic}/_structure.md` |
-| 3 | Planner | Build unified Table of Contents | `research/_plan/toc.md` |
+| 1 | Researcher ×N | Search + extract per subtopic (parallel, write files directly) | `research/{subtopic}/_links.md` + `extract_*.md` |
+| 2 | Analyst ×N | Analyze extracts per subtopic → section proposals (parallel) | `research/{subtopic}/_structure.md` |
+| 3 | Planner | Build unified Table of Contents with page budgets | `research/_plan/toc.md` |
 | 4 | Writer ×M | Write sections in parallel (one per ToC entry) | `draft/_sections/NN_*.md` |
 | 5 | Editor | Merge all sections into cohesive document | `draft/v1.md` |
 | 6 | Critic | Review → APPROVED or REVISE (max 2 loops) | `draft/_review.md` |
-| 7 | Illustrator | Generate PNGs via PaperBanana, embed in draft | `illustrations/*.png` |
+| 7 | Orchestrator | Generate PNGs via PaperBanana, embed in draft | `illustrations/*.png` + `illustrations/_manifest.md` |
 | 8 | — | Delivery: stats, paths, next steps | — |
+
+**Validation gates** at each phase: word count checks, file existence, structural integrity. Retry up to 2× if quality is insufficient.
 
 ### Parameters
 
@@ -73,15 +79,17 @@ All parameters are **optional** — sensible defaults are applied.
 | **Size** | `brief` (15–20p), `standard` (30–40p), `detailed` (60–100p) | `standard` |
 | **Language** | Any | Auto-detected from query |
 | **Document type** | `comparison`, `overview`, `sota`, `report` | Auto-detected |
-| **Illustration mode** | `direct` (default), `pipeline`, `none` | `direct` |
+| **Illustration mode** | `pipeline` (full PaperBanana cycle), `direct` (single API call), `none` | `pipeline` |
 
 ### Research agents
 
 | Agent | Model | Role |
 |-------|-------|------|
-| **Research Orchestrator** | Sonnet | Entry point, dumb scheduler |
-| **Researcher** | Sonnet | URL discovery + full content extraction per subtopic |
-| **Analyst** | Sonnet | Per-subtopic structure analysis |
+| **Research Orchestrator** | Sonnet 4.6 | Entry point, deterministic pipeline via `research_pipeline_runner.py` |
+| **Researcher** | Sonnet 4.6 | Per-subtopic deep web search + content extraction (writes files directly) |
+| **Analyst** | Sonnet 4.6 | Per-subtopic structure analysis |
+
+**Search cascade** (when Tavily quota exceeded): Tavily → GitHub search (repos + code) → HuggingFace (papers + docs) → `fetch_webpage` for extraction.
 
 ---
 
@@ -119,33 +127,34 @@ The pipeline supports 5 source types in `params.md`:
 | `code` | Source Analyzer (sub-agent) | Reads files, extracts module structure, APIs, patterns |
 | `docs` | Source Analyzer (sub-agent) | Extracts ADRs, requirements, constraints |
 | `config` | Source Analyzer (sub-agent) | Maps infrastructure topology, env vars, dependencies |
-| `web` | Orchestrator (direct) | Fetches web pages, extracts content |
-| `confluence` | Orchestrator (direct) | Reads Confluence pages via MCP/REST |
+| `web` | Orchestrator (direct) | Fetches web pages via `fetch_webpage`, extracts content |
+| `confluence` | Orchestrator (direct) | Reads Confluence pages via MCP REST API |
 
 ### Phases
 
 | Phase | Agent | Action | Output |
 |-------|-------|--------|--------|
 | 0 | Orchestrator | Parse request → `params.md` with `## Sources` | `research/_plan/params.md` |
-| 1a | Orchestrator | Fetch web / Confluence sources directly | `research/{area}/extract_*.md` |
-| 1b | Source Analyzer ×N | Analyze code / docs / config in parallel | `research/{area}/extract_*.md` |
+| 1a | Orchestrator | Fetch web sources directly | `research/{area}/extract_*.md` |
+| 1b | Orchestrator | Fetch Confluence pages via MCP | `research/{area}/extract_*.md` |
+| 1c | Source Analyzer ×N | Analyze code / docs / config in parallel | `research/{area}/extract_*.md` |
 | 2 | Arch Assessor ×N | Per-area assessment: patterns, tech debt, dependencies | `research/{area}/_assessment.md` |
 | 3 | Solution Architect | Design 2–3 architecture options with trade-offs | `research/_plan/_proposals.md` |
 | 4 | Planner | Build ToC for proposal document | `research/_plan/toc.md` |
 | 5 | Writer ×M | Write sections in parallel | `draft/_sections/NN_*.md` |
 | 6 | Editor | Merge into cohesive document | `draft/v1.md` |
-| 7 | Critic | Review with architecture-specific criteria | `draft/_review.md` |
-| 8 | Illustrator | Generate architecture diagrams | `illustrations/*.png` |
+| 7 | Critic | Review with architecture-specific criteria (max 2 loops) | `draft/_review.md` |
+| 8 | Orchestrator | Generate architecture diagrams via PaperBanana | `illustrations/*.png` + `illustrations/_manifest.md` |
 | 9 | — | Delivery + optional Confluence publish / PDF export | — |
 
 ### Architecture-specific agents
 
 | Agent | Model | Role |
 |-------|-------|------|
-| **Architecture Orchestrator** | Sonnet | Entry point, handles web/Confluence I/O |
-| **Source Analyzer** | Sonnet | Scans code, docs, configs → structured extracts |
-| **Arch Assessor** | Sonnet | Per-area architecture assessment (patterns, debt, risks) |
-| **Solution Architect** | Opus | Synthesizes assessments → 2–3 proposals with recommendation |
+| **Architecture Orchestrator** | Sonnet 4.6 | Entry point, handles web/Confluence I/O, runs PaperBanana |
+| **Source Analyzer** | Sonnet 4.6 | Scans code, docs, configs → structured extracts |
+| **Arch Assessor** | Sonnet 4.6 | Per-area architecture assessment (patterns, debt, risks) |
+| **Solution Architect** | Opus 4.6 | Synthesizes assessments → 2–3 proposals with recommendation |
 
 ---
 
@@ -155,29 +164,45 @@ The pipeline supports 5 source types in `params.md`:
 
 **Folders = Routing.** Each subtopic (research) or source area (architecture) gets its own folder under `research/`.
 
-**Orchestrator = Dumb Scheduler.** The Python state machine (`pipeline_runner.py` / `arch_pipeline_runner.py`) decides the next phase. The orchestrator agent just executes.
+**Orchestrator = Dumb Scheduler.** The Python state machine (`research_pipeline_runner.py` / `arch_pipeline_runner.py`) decides the next phase. The orchestrator agent just executes.
 
-**Sub-agents return text (by design, not limitation).** Sub-agents CAN write files and use MCP tools, but the pipeline uses a centralized I/O pattern: most sub-agents return markdown text, and the orchestrator writes it to disk. This gives the orchestrator control over verification and logging. Exception: Researcher agents write their own files directly.
+**Sub-agents return text → Orchestrator writes files.** Most pipeline agents return markdown text. The orchestrator writes it to `output_file` and verifies. **Exception:** Researcher agents (Phase 1) write `_links.md` and `extract_*.md` files directly to enable parallel search + extraction.
 
-**Deterministic phases.** Each phase has validation gates. The state machine checks word counts, file existence, and structural integrity before advancing.
+**Deterministic phases with retry.** Each phase has validation gates — word counts, file existence, structural integrity. Up to 2 automatic retries if quality thresholds are not met.
+
+**Parallel sub-agent execution.** Multiple `runSubagent` calls in one tool-call batch run concurrently. Phases 1, 2, 4 (and arch Phase 1c, 2, 5) launch agents in parallel.
 
 ---
 
 ## PaperBanana Illustration System
 
-Both pipelines use **PaperBanana** to generate publication-quality PNG diagrams — no Mermaid, no ASCII art, no screenshots.
+Both pipelines use **PaperBanana** (`llmsresearch/paperbanana`) to generate publication-quality PNG diagrams — no Mermaid, no ASCII art, no screenshots.
 
 | Mode | When to use | Command |
 |------|-------------|---------|
-| `--direct` | Architecture diagrams, flowcharts, comparisons | `paperbanana_generate.py "prompt" "output.png" --direct --type architecture` |
-| `--context` | Data visualizations, methodology figures | `paperbanana_generate.py "desc" "output.png" --context "text" --type methodology` |
+| Full pipeline (default) | All illustration types, best quality | `paperbanana_generate.py "desc" "output.png" --context "text" --critic-rounds 2` |
+| `--direct` | Quick generation, single API call (~40s) | `paperbanana_generate.py "desc" "output.png" --direct` |
 
-**Visual style:** NeurIPS 2025 academic aesthetic — flat vector, 2D, white background, pastel palette, clean typography.
+**Models:** `gpt-5.2` (VLM: Planner/Stylist/Critic) + `gpt-image-1.5` (Visualizer). Configurable via `TEXT_MODEL` / `IMAGE_MODEL` env vars.
 
-**Placeholder format** (written by Writer, processed by Illustrator):
+**Pipeline stages:** Retriever → Planner → Stylist → Visualizer ↔ Critic (2 refinement rounds). Takes 3–5 min per illustration.
+
+**Visual style:** NeurIPS academic aesthetic — flat vector, 2D, white background, pastel palette, clean typography.
+
+**Placeholder format** (written by Writer, processed by Orchestrator at illustration phase):
 ```markdown
 <!-- ILLUSTRATION: type="architecture", section="§2", description="..." -->
 ```
+
+---
+
+## Utility Scripts
+
+| Script | Purpose |
+|--------|---------|
+| `extract_url.py` | Download + extract text from URL → write structured extract file. SSRF-safe (HTTPS/HTTP only). |
+| `merge_sections.py` | Deterministic merge of `draft/_sections/*.md` → `draft/v1.md` (sorted by numeric prefix). |
+| `validate_agents.py` | Validate all `.agent.md` and `.instructions.md` for structural correctness, cross-references, phase numbers. |
 
 ---
 
@@ -188,6 +213,7 @@ Both pipelines use **PaperBanana** to generate publication-quality PNG diagrams 
 @pdf-exporter
 Export generated_docs_20260310_120000/draft/v1.md to PDF
 ```
+Uses WeasyPrint with custom CSS — A4, styled headings, zebra tables, image borders, numbered pages.
 
 ### Confluence Publish
 ```
@@ -195,7 +221,7 @@ Export generated_docs_20260310_120000/draft/v1.md to PDF
 Publish generated_arch_20260310_150000/draft/v1.md
 to space=ARCH, title=LLM Orchestrator Proposal
 ```
-Confluence Publisher uses **REST API** for image uploads (MCP cannot upload images). Requires `CONFLUENCE_URL`, `CONFLUENCE_USER`, `CONFLUENCE_TOKEN` env vars.
+Images uploaded via **REST API with Bearer token** (MCP cannot upload images). Requires `CONFLUENCE_URL`, `CONFLUENCE_TOKEN` env vars.
 
 ---
 
@@ -204,8 +230,8 @@ Confluence Publisher uses **REST API** for image uploads (MCP cannot upload imag
 ```
 .github/
   agents/                       # 15 agent definitions
-    research-orchestrator.agent.md   # Pipeline 1 entry point
-    architecture-orchestrator.agent.md  # Pipeline 2 entry point
+    research-orchestrator.agent.md   # Pipeline 1 entry point (deterministic)
+    architecture-orchestrator.agent.md  # Pipeline 2 entry point (deterministic)
     researcher.agent.md          # URL discovery + content extraction
     analyst.agent.md             # Structure analysis
     source-analyzer.agent.md     # Code/docs/config scanning
@@ -218,10 +244,9 @@ Confluence Publisher uses **REST API** for image uploads (MCP cannot upload imag
     illustrator.agent.md         # PNG generation
     pdf-exporter.agent.md        # PDF conversion
     confluence-publisher.agent.md # Confluence publishing
-    deterministic-orchestrator.agent.md  # Legacy orchestrator
   instructions/                  # Per-agent instruction files
   scripts/
-    pipeline_runner.py           # Research pipeline state machine
+    research_pipeline_runner.py   # Research pipeline state machine
     arch_pipeline_runner.py      # Architecture pipeline state machine
     validate_agents.py           # Agent file validator
   skills/
@@ -264,7 +289,7 @@ Each pipeline run creates a timestamped folder:
 
 ```
 generated_docs_YYYYMMDD_HHMMSS/
-├── workflow_log.md              # Full pipeline execution log with timestamps
+├── pipeline.log                 # Automatic debug trace (loguru)
 ├── research/
 │   ├── _plan/
 │   │   ├── params.md            # Topic, audience, subtopics (Phase 0)

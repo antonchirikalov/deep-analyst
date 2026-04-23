@@ -28,6 +28,11 @@ CSS = """
         color: #666;
     }
 }
+@page :first {
+    @bottom-center {
+        content: none;
+    }
+}
 
 body {
     font-family: "Helvetica Neue", Helvetica, Arial, "Noto Sans", sans-serif;
@@ -237,6 +242,83 @@ h2 {
 h2:nth-of-type(n+3) {
     page-break-before: always;
 }
+
+/* ── Cover page ── */
+.cover-page {
+    text-align: center;
+    page-break-after: always;
+    padding-top: 15mm;
+}
+.cover-spacer {
+    height: 5mm;
+}
+.cover-title {
+    font-size: 28pt;
+    font-weight: 700;
+    color: #111;
+    border-bottom: none;
+    margin-bottom: 16pt;
+    line-height: 1.3;
+}
+.cover-img {
+    max-width: 75%;
+    margin: 12pt auto;
+    border: none;
+    border-radius: 8pt;
+}
+.cover-subtitle {
+    font-size: 14pt;
+    color: #475569;
+    margin-top: 16pt;
+    margin-bottom: 24pt;
+}
+.cover-author {
+    font-size: 16pt;
+    font-weight: 600;
+    color: #1a1a1a;
+    margin-top: 24pt;
+}
+.cover-spacer-bottom {
+    height: 15mm;
+}
+.cover-publisher {
+    font-size: 12pt;
+    font-style: italic;
+    color: #64748b;
+    margin-bottom: 4pt;
+}
+.cover-year {
+    font-size: 12pt;
+    color: #64748b;
+}
+
+/* ── Auto-generated ToC ── */
+.toc {
+    page-break-after: always;
+}
+.toc ul {
+    list-style: none;
+    padding-left: 0;
+}
+.toc > ul > li {
+    margin-bottom: 6pt;
+    font-weight: 600;
+    font-size: 11pt;
+}
+.toc > ul > li > ul {
+    padding-left: 18pt;
+    margin-top: 3pt;
+}
+.toc > ul > li > ul > li {
+    font-weight: 400;
+    font-size: 10pt;
+    margin-bottom: 2pt;
+    color: #475569;
+}
+.toc a {
+    color: #1e3a5f;
+    text-decoration: none;
+}
 """
 
 
@@ -277,7 +359,13 @@ def convert_md_to_pdf(md_path: str, pdf_path: str) -> None:
         "smarty",
         "sane_lists",
     ]
-    html_body = markdown.markdown(md_text, extensions=extensions)
+    extension_configs = {
+        "toc": {
+            "permalink": False,
+            "toc_depth": "2-3",
+        },
+    }
+    html_body = markdown.markdown(md_text, extensions=extensions, extension_configs=extension_configs)
     
     # Wrap in full HTML
     html_doc = f"""<!DOCTYPE html>

@@ -3,7 +3,7 @@ name: Planner
 description: Document architect — merges all per-topic structures into a unified Table of Contents with page budgets and source assignments.
 model: Claude Opus 4.6 (copilot)
 user-invocable: false
-tools: ['read_file', 'create_file', 'list_dir', 'run_in_terminal', 'get_terminal_output']
+tools: ['read', 'terminal']
 ---
 
 # Role
@@ -31,11 +31,11 @@ See these instruction files for complete requirements:
    - SHALLOW topic → 1 page (merge with neighbor)
    - If total exceeds `max_pages`, cut Introduction/Conclusion to 1 page each. **Never cut DEEP below 4 pages.**
 5. **Assign source files** — for each section, list the exact `research/{subtopic}/extract_N.md` paths
-6. **Write `toc.md`**
+6. **RETURN** the ToC as markdown (the Orchestrator writes it to `toc.md`)
 
 # Output Format
 
-Write to `{BASE_FOLDER}/research/_plan/toc.md`:
+RETURN markdown in this exact format (start directly with content, no preamble):
 
 ```markdown
 # Table of Contents
@@ -63,35 +63,6 @@ Description: {What this section covers}
 - **Cross-referencing:** If two subtopics overlap, merge their extracts into one section
 - **Budget discipline:** All page counts must sum to `max_pages` (±1 page tolerance)
 - **300 words per page** — standard academic density
-
-# Debug Tracing
-
-```bash
-# At start
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Planner --phase 4 \
-  --action start --status ok --detail "Building unified ToC"
-
-# After reading params
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Planner --phase 4 \
-  --action read --status ok --target "research/_plan/params.md" --words $WORD_COUNT
-
-# After reading each _structure.md
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Planner --phase 4 \
-  --action read --status ok --target "research/{subtopic}/_structure.md" --words $WORD_COUNT
-
-# After writing toc.md
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Planner --phase 4 \
-  --action write --status ok --target "research/_plan/toc.md" --words $WORD_COUNT
-
-# At completion
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Planner --phase 4 \
-  --action done --status ok --detail "ToC: N sections, {max_pages} pages total"
-```
 
 # Rules
 

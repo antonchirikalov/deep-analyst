@@ -2,7 +2,7 @@
 name: Confluence Publisher
 description: "Publishes final documents to Confluence with images via REST API. Standalone utility — not part of any pipeline."
 model: Claude Haiku 4.5 (copilot)
-tools: ['read_file', 'list_dir', 'run_in_terminal', 'get_terminal_output', 'grep_search']
+tools: ['read', 'terminal', 'search']
 agents: []
 ---
 
@@ -29,7 +29,7 @@ curl -u "$CONFLUENCE_USER:$CONFLUENCE_TOKEN" ...
 - `CONFLUENCE_URL` — base URL, e.g. `https://confluence.scnsoft.com` (no trailing `/wiki` for Server/DC)
 - `CONFLUENCE_TOKEN` — Personal Access Token (base64 string)
 
-The publishing script uses `CONFLUENCE_URL` + `CONFLUENCE_TOKEN`.
+Note: MCP `mcp-atlassian` config uses different var names (`CONFLUENCE_PERSONAL_TOKEN`, `CONFLUENCE_USERNAME`). The publishing script uses `CONFLUENCE_URL` + `CONFLUENCE_TOKEN`.
 
 # Quick Start — Use the Publishing Script
 
@@ -39,7 +39,7 @@ The **primary method** is the Python script that handles everything:
 export CONFLUENCE_URL="https://confluence.scnsoft.com"
 export CONFLUENCE_TOKEN="<your-PAT>"
 
-.venv/bin/python scripts/publish_to_confluence.py \
+.venv/bin/python .github/skills/confluence-publisher/scripts/publish_to_confluence.py \
   --draft <path/to/draft/v1.md> \
   --illustrations <path/to/illustrations/> \
   --parent-id <parent-page-id> \
@@ -47,7 +47,7 @@ export CONFLUENCE_TOKEN="<your-PAT>"
   [--title "Custom Page Title"]
 ```
 
-The script (`scripts/publish_to_confluence.py`) does:
+The script (`.github/skills/confluence-publisher/scripts/publish_to_confluence.py`) does:
 1. Converts markdown to Confluence storage format (XHTML) with proper HTML entity escaping
 2. Verifies parent page exists
 3. Creates child page
@@ -165,11 +165,20 @@ If the user says "update existing":
      "$CONFLUENCE_URL/rest/api/content?title=$PAGE_TITLE&spaceKey=$SPACE_KEY&expand=version"
    ```
 2. Get current version number
-3. PUT with incremented version:
+3. PUT with incremented version (**preferred**: use `--update <page-id>` flag in the Python script):
+   ```bash
+   .venv/bin/python .github/skills/confluence-publisher/scripts/publish_to_confluence.py \
+     --draft <path/to/draft/v1.md> \
+     --illustrations <path/to/illustrations/> \
+     --parent-id <parent-page-id> \
+     --space <SPACE_KEY> \
+     --update <existing-page-id>
+   ```
+   Or manually via curl:
    ```bash
    curl -s -H "Authorization: Bearer $CONFLUENCE_TOKEN" \
-     -X PUT "$CONFLUENCE_URL/rest/api/content/$PAGE_ID" \
      -H "Content-Type: application/json" \
+     -X PUT "$CONFLUENCE_URL/rest/api/content/$PAGE_ID" \
      -d '{
        "version": {"number": NEW_VERSION},
        "title": "'"$PAGE_TITLE"'",
@@ -182,12 +191,13 @@ If the user says "update existing":
 
 | Variable | Required | Description |
 |---|---|---|
-| `CONFLUENCE_URL` | Yes | Base URL, e.g., `https://confluence.scnsoft.com` (no trailing `/wiki` for Server/DC) |
-| `CONFLUENCE_TOKEN` | Yes | Personal Access Token (PAT) — used with `Authorization: Bearer` header |
+| `CONFLUENCE_URL` | Yes | Base URL, e.g. `https://confluence.scnsoft.com` (no trailing `/wiki` for Server/DC) |
+| `CONFLUENCE_TOKEN` | Yes | Personal Access Token (PAT) — used as `Authorization: Bearer $CONFLUENCE_TOKEN` |
+
+> **Note:** `CONFLUENCE_USER` is NOT required for Bearer auth. `CONFLUENCE_PERSONAL_TOKEN` is the MCP `mcp-atlassian` config variable — it is different from `CONFLUENCE_TOKEN` used by the publishing script.
 
 # Rules
 
-- **NEVER use MCP Confluence tools (`mcp_mcp-atlassian_confluence_*`).** They cannot upload images. ALL operations go through REST API via `curl` or the Python publishing script.
 - **Never modify the original `.md` file**
 - **Always upload images BEFORE page content references them** (or use two-pass: create page, upload images, update page)
 - **Report: page URL, attachment count, any errors**

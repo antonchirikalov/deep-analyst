@@ -62,7 +62,7 @@ Add 1-2 sentence transitions between major sections. Examples:
 | Situation | Action |
 |---|---|
 | Total >10% over target | Trim: shorten verbose explanations, remove redundant examples |
-| Total >15% under target | Flag in agent-trace log — content may be too thin |
+| Total >15% under target | Flag as warning — content may be too thin |
 | Individual section wildly over/under | Note but don't force-trim — the Critic will catch this |
 
 ## Illustration Placeholder Preservation

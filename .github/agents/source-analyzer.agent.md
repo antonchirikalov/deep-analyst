@@ -3,7 +3,7 @@ name: Source Analyzer
 description: "Analyzes source code, documentation, and configuration files. Builds a structural map and extracts architecture-relevant artifacts into extract files."
 model: Claude Sonnet 4.6 (copilot)
 user-invocable: false
-tools: ['read_file', 'list_dir', 'grep_search', 'file_search', 'run_in_terminal', 'get_terminal_output']
+tools: ['read', 'search', 'terminal']
 ---
 
 # Role

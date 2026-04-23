@@ -22,10 +22,23 @@ import shutil
 import sys
 
 from dotenv import load_dotenv
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-load_dotenv()
+# Walk up from this script to find .env at the workspace root
+# Script lives at .github/skills/image-generator/scripts/paperbanana_generate.py
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_WORKSPACE_ROOT = _SCRIPT_DIR.parents[3]  # scripts → image-generator → skills → .github → repo root
+_ENV_FILE = _WORKSPACE_ROOT / ".env"
+
+if _ENV_FILE.exists():
+    load_dotenv(_ENV_FILE)
+    logger.info("Loaded .env from %s", _ENV_FILE)
+else:
+    # Fallback: let find_dotenv search from CWD upward
+    load_dotenv()
+    logger.warning("No .env at %s — falling back to find_dotenv()", _ENV_FILE)
 
 
 def _build_settings(iterations: int = 3) -> "Settings":
@@ -89,7 +102,7 @@ async def run_pipeline(
 
 
 def run_direct(description: str, output_path: str, size: str = "") -> str:
-    """Direct OpenAI generation — recommended for architecture/technical diagrams."""
+    """Direct OpenAI generation — single API call, simpler output."""
     import base64
     import openai
 
@@ -145,7 +158,7 @@ def main():
     )
     parser.add_argument(
         "--direct", action="store_true",
-        help="Skip PaperBanana pipeline, use direct OpenAI image generation (recommended for architecture diagrams)"
+        help="Skip PaperBanana pipeline, use direct OpenAI image generation"
     )
     parser.add_argument(
         "--size", default="",
@@ -158,6 +171,14 @@ def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
+
+    if not os.environ.get("OPENAI_API_KEY"):
+        logger.error(
+            "OPENAI_API_KEY not found in environment. "
+            "Ensure .env exists at workspace root (%s) with OPENAI_API_KEY=sk-...",
+            _WORKSPACE_ROOT,
+        )
+        sys.exit(1)
 
     max_rounds = args.critic_rounds or int(os.environ.get("MAX_CRITIC_ROUNDS", "2"))
 

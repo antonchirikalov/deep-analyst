@@ -3,7 +3,7 @@ name: Critic
 description: Formalized document reviewer — evaluates draft quality and produces structured APPROVED/REVISE verdict with per-section feedback.
 model: Claude Sonnet 4.6 (copilot)
 user-invocable: false
-tools: ['read_file', 'create_file', 'run_in_terminal', 'get_terminal_output']
+tools: ['read', 'terminal']
 ---
 
 # Role
@@ -22,7 +22,7 @@ See these instruction files for complete requirements:
 2. **Read** `{BASE_FOLDER}/research/_plan/params.md` — target pages, audience, tone, language
 3. **Read** `{BASE_FOLDER}/research/_plan/toc.md` — section budgets for word count verification
 4. **Evaluate** against criteria (see below)
-5. **Write** `{BASE_FOLDER}/draft/_review.md` with formalized verdict
+5. **RETURN** the review as markdown (the Orchestrator writes it to `_review.md`)
 
 # Evaluation Criteria
 
@@ -45,7 +45,7 @@ See these instruction files for complete requirements:
 
 # Output Format
 
-Write to `{BASE_FOLDER}/draft/_review.md`. **Verdict header ALWAYS in English**, even if the document is in another language:
+RETURN markdown in this exact format (the Orchestrator writes it to `draft/_review.md`). **Verdict header ALWAYS in English**, even if the document is in another language:
 
 ```markdown
 ## Verdict: APPROVED | REVISE | REJECTED
@@ -77,35 +77,6 @@ Write to `{BASE_FOLDER}/draft/_review.md`. **Verdict header ALWAYS in English**,
 | **LOW** | Minor wording, formatting, could be slightly better | No rewrite needed |
 
 Only HIGH and MEDIUM severity sections trigger rewrites. LOW is informational only.
-
-# Debug Tracing
-
-```bash
-# At start
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Critic --phase 7 \
-  --action start --status ok --detail "Reviewing draft"
-
-# After reading draft
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Critic --phase 7 \
-  --action read --status ok --target "draft/v1.md" --words $WORD_COUNT
-
-# After reading params
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Critic --phase 7 \
-  --action read --status ok --target "research/_plan/params.md" --words $WORD_COUNT
-
-# After writing review
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Critic --phase 7 \
-  --action write --status ok --target "draft/_review.md" --words $WORD_COUNT
-
-# At completion
-python3 .github/skills/workflow-logger/scripts/agent-trace.py log \
-  --folder $BASE_FOLDER --agent Critic --phase 7 \
-  --action done --status ok --detail "Verdict: {VERDICT}, {N} sections to revise"
-```
 
 # Rules
 
